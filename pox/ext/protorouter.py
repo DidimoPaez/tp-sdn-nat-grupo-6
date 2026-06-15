@@ -60,6 +60,7 @@ class PendingPacket:
         self.in_port = in_port
         self.raw_packet = raw_packet
         self.nat_entry = nat_entry
+        self.created_at = time.monotonic()
 
 
 class ProtoRouter(object):
@@ -135,6 +136,12 @@ class ProtoRouter(object):
 
     def handle_packet_arp_reply(self, event):
         packet = event.parsed
+        arp_packet = packet.payload
+
+        host_public_ip = arp_packet.protosrc
+        host_public_mac = arp_packet.hwsrc
+        public_openflow_port = event.port
+
         log_color(
             YELLOW,
             f"ALGUNAS VARIABLES EN - handle_packet_arp_reply -:\n\
@@ -150,6 +157,65 @@ class ProtoRouter(object):
                         packet.payload.hwlen: {packet.payload.hwlen}\n\
                             ",
         )
+        self.learn_arp_entry(public_openflow_port, host_public_ip, host_public_mac)
+
+        pending_list = self.pending_packets.pop(host_public_ip, [])
+
+        if not pending_list:
+            log_color(YELLOW, f"No pending packets for {host_public_ip}")
+            return
+        for pending_packet in pending_list:
+            nat_entry = pending_packet.nat_entry
+
+            if nat_entry is None:
+                log_color(RED, "[ERROR] Pending packet without NAT entry")
+                continue
+
+            nat_entry.host_public_mac = host_public_mac
+            nat_entry.public_openflow_port = public_openflow_port
+            nat_entry.state = STATE_INSTALLED
+            nat_entry.last_seen = time.monotonic()
+
+            log_color(GREEN, f"NAT entry completed after ARP Reply:\n{nat_entry}")
+
+            self.forward_pending_packet(pending_packet)
+            # TODO(Actualizar la respectiva entrada de la self.nat_table)
+            # TODO (Generar el flujo entrante y saliente para la respectiva NAT Entry)
+
+    def forward_pending_packet(self, pending_packet):
+        nat_entry = pending_packet.nat_entry
+
+        if nat_entry is None:
+            log_color(RED, "[ERROR] NAT Entry does not exist")
+            return
+
+        if nat_entry.host_public_mac is None:
+            log_color(RED, "[ERROR] Public host MAC is still unknown")
+            return
+
+        msg = of.ofp_packet_out()
+        msg.data = pending_packet.raw_packet
+
+        msg.actions.append(of.ofp_action_dl_addr.set_src(self.nat_public_mac))
+        msg.actions.append(of.ofp_action_dl_addr.set_dst(nat_entry.host_public_mac))
+
+        msg.actions.append(of.ofp_action_nw_addr.set_src(self.nat_public_ip))
+
+        msg.actions.append(of.ofp_action_tp_port.set_src(nat_entry.nat_public_port))
+
+        msg.actions.append(of.ofp_action_output(port=nat_entry.public_openflow_port))
+
+        log_color(
+            GREEN,
+            f"Forwarding pending packet with NAT: "
+            f"{nat_entry.host_private_ip}:{nat_entry.host_private_port} "
+            f"-> {nat_entry.host_public_ip}:{nat_entry.host_public_port} "
+            f"as {self.nat_public_ip}:{nat_entry.nat_public_port} | "
+            f"dst_mac={nat_entry.host_public_mac} | "
+            f"outport={nat_entry.public_openflow_port}",
+        )
+
+        self.connection.send(msg)
 
     def handle_packet_arp_request(self, event):
         packet = event.parsed
@@ -307,7 +373,7 @@ class ProtoRouter(object):
 
         nat_entry = self.make_a_nat_entry(packet, event.port)
 
-        pending_packet = PendingPacket(PUBLIC_PORT, raw_packet, nat_entry)
+        pending_packet = PendingPacket(event.port, raw_packet, nat_entry)
 
         if target_ip not in self.pending_packets:
             self.pending_packets[target_ip] = []
