@@ -1,6 +1,5 @@
 # Import some POX stuff
 
-
 import time
 
 import pox.openflow.libopenflow_01 as of  # OpenFlow 1.0 library
@@ -8,6 +7,18 @@ from pox.core import core  # Main POX object
 from pox.lib.addresses import EthAddr, IPAddr  # Address types
 from pox.lib.packet.arp import arp
 from pox.lib.packet.ethernet import ethernet
+from protorouter_lib.constants import (
+    INITIAL_ASSIGNED_PORT,
+    PRIVATE,
+    PROTO_TCP,
+    PROTO_UDP,
+    PUBLIC,
+    STATE_INSTALLED,
+)
+from protorouter_lib.models.arp_entry import ArpEntry
+from protorouter_lib.models.nat_entry import NatEntry
+from protorouter_lib.models.pending_packet import PendingPacket
+from protorouter_lib.openflow_sender import OpenFlowSender
 
 log = core.getLogger()
 RED = "\033[31m"
@@ -33,35 +44,6 @@ H1_MAC = EthAddr(
     "00:00:00:00:00:01"
 )  # MAC del host externo (TODO: resolver mediante ARP)
 
-PRIVATE: str = "private"
-PUBLIC: str = "public"
-
-MAC_ETHER_LENGTH: int = 6  # MAC addr Ethernet mide 48 bits
-IP_ADDR_LENGTH: int = 4  ##dirección IPv4 mide 32 bits
-MAC_UNKNOWN: str = "00:00:00:00:00:00"
-ETHER_BROADCAST: str = "ff:ff:ff:ff:ff:ff"
-
-TIME_OUT: int = 60
-STATE_PENDING_ARP = "Pending ARP"
-STATE_INSTALLED = "Installed"
-
-INITIAL_ASSIGNED_PORT: int = 10000
-
-
-class ArpEntry:
-    def __init__(self, mac: str, switch_openflow_port: int, port_type: str):
-        self.mac = mac
-        self.switch_openflow_port = switch_openflow_port
-        self.port_type = port_type
-
-
-class PendingPacket:
-    def __init__(self, in_port: int, raw_packet: bytes, nat_entry):
-        self.in_port = in_port
-        self.raw_packet = raw_packet
-        self.nat_entry = nat_entry
-        self.created_at = time.monotonic()
-
 
 class ProtoRouter(object):
     def __init__(self, connection):
@@ -76,16 +58,15 @@ class ProtoRouter(object):
         self.pending_packets: dict = {}
         self.openflow_ports: set = set()
         self.arp_table: dict = {}
-        self.global_counter: int = 1  ##
+        self.global_counter: int = 1  # Debug counter
         self.connection = connection
         connection.addListeners(self)
+        self.openflow_sender = OpenFlowSender(connection=self.connection)
 
     def _handle_PacketIn(self, event):
-        log_color(
-            RED,
-            f" - CANTIDAD DE VECES QUE SE HA ENTRADO A _handle_PacketIn: [{self.global_counter}] - ",
-        )  ##
+        log_color(RED, f"_handle_PacketIn has been called {self.global_counter} times")
         self.global_counter += 1
+
         packet = event.parsed
 
         if not packet.parsed:
@@ -96,45 +77,25 @@ class ProtoRouter(object):
 
         if packet.type == ethernet.IP_TYPE:
             self.handle_ip(event)
-            log_color(
-                YELLOW,
-                f"ALGUNAS VARIABLES:\n\
-                        event.port: {event.port}\n\
-                        packet.find(udp): {packet.find('udp')}\n\
-                        packet.find(tcp): {packet.find('tcp')}\n",
-            )
-        elif packet.type == ethernet.ARP_TYPE:
-            if packet.payload.opcode == arp.REQUEST:
-                self.handle_packet_arp_request(event)
-                log_color(
-                    YELLOW,
-                    f"-SE TIENE UN PACKET IN DE TIPO: arp.REQUEST {arp.REQUEST}-",
-                )
-                log_color(
-                    YELLOW,
-                    f"ALGUNAS VARIABLES:\n\
-                        event.port: {event.port}\n\
-                        packet.find(udp): {packet.find('udp')}\n\
-                        packet.find(tcp): {packet.find('tcp')}\n\
-                        packet.src: {packet.src}\n\
-                        packet.payload.protosrc: {packet.payload.protosrc}\n\
-                        packet.payload.protodst: {packet.payload.protodst}\n\
-                        packet.payload.hwsrc: {packet.payload.hwsrc}\n\
-                        packet.payload.protolen: {packet.payload.protolen}\n\
-                        packet.payload.hwlen: {packet.payload.hwlen}\n\
-                            ",
-                )
 
-            elif packet.payload.opcode == arp.REPLY:
-                log_color(
-                    YELLOW,
-                    f"-SE TIENE UN PACKET IN DE TIPO: arp.REPLY {arp.REPLY}-",
-                )
-                self.handle_packet_arp_reply(event)
+        elif packet.type == ethernet.ARP_TYPE:
+            self.handle_arp_type(event)
+
         else:
-            log_color(YELLOW, "Packet ignored: protocol received: {packet.type}.")
+            log_color(RED, "Packet ignored: protocol received: {packet.type}.")
+
+    def handle_arp_type(self, event):
+        packet = event.parsed
+        arp_packet = packet.payload
+
+        if arp_packet.opcode == arp.REQUEST:
+            self.handle_packet_arp_request(event)
+
+        elif arp_packet.opcode == arp.REPLY:
+            self.handle_packet_arp_reply(event)
 
     def handle_packet_arp_reply(self, event):
+        log_color(YELLOW, "Handling an ARP Reply")
         packet = event.parsed
         arp_packet = packet.payload
 
@@ -142,21 +103,6 @@ class ProtoRouter(object):
         host_public_mac = arp_packet.hwsrc
         public_openflow_port = event.port
 
-        log_color(
-            YELLOW,
-            f"ALGUNAS VARIABLES EN - handle_packet_arp_reply -:\n\
-                        event.port: {event.port}\n\
-                        packet.find(udp): {packet.find('udp')}\n\
-                        packet.find(tcp): {packet.find('tcp')}\n\
-                        packet.src: {packet.src}\n\
-                        packet.payload.protosrc: {packet.payload.protosrc}\n\
-                        packet.payload.protodst: {packet.payload.protodst}\n\
-                        packet.payload.hwsrc: {packet.payload.hwsrc}\n\
-                        packet.payload.hwdst: {packet.payload.hwdst}\n\
-                        packet.payload.protolen: {packet.payload.protolen}\n\
-                        packet.payload.hwlen: {packet.payload.hwlen}\n\
-                            ",
-        )
         self.learn_arp_entry(public_openflow_port, host_public_ip, host_public_mac)
 
         pending_list = self.pending_packets.pop(host_public_ip, [])
@@ -192,32 +138,21 @@ class ProtoRouter(object):
         if nat_entry.host_public_mac is None:
             log_color(RED, "[ERROR] Public host MAC is still unknown")
             return
-
-        msg = of.ofp_packet_out()
-        msg.data = pending_packet.raw_packet
-
-        msg.actions.append(of.ofp_action_dl_addr.set_src(self.nat_public_mac))
-        msg.actions.append(of.ofp_action_dl_addr.set_dst(nat_entry.host_public_mac))
-
-        msg.actions.append(of.ofp_action_nw_addr.set_src(self.nat_public_ip))
-
-        msg.actions.append(of.ofp_action_tp_port.set_src(nat_entry.nat_public_port))
-
-        msg.actions.append(of.ofp_action_output(port=nat_entry.public_openflow_port))
-
-        log_color(
-            GREEN,
-            f"Forwarding pending packet with NAT: "
-            f"{nat_entry.host_private_ip}:{nat_entry.host_private_port} "
-            f"-> {nat_entry.host_public_ip}:{nat_entry.host_public_port} "
-            f"as {self.nat_public_ip}:{nat_entry.nat_public_port} | "
-            f"dst_mac={nat_entry.host_public_mac} | "
-            f"outport={nat_entry.public_openflow_port}",
+        self.openflow_sender.forward_of_data(
+            pending_packet.raw_packet,
+            self.nat_public_mac,
+            self.nat_public_ip,
+            nat_entry.nat_public_port,
+            nat_entry.public_openflow_port,
+            nat_entry.host_public_mac,
+            nat_entry.host_public_ip,
+            nat_entry.host_public_port,
+            nat_entry.host_private_ip,
+            nat_entry.host_private_port,
         )
 
-        self.connection.send(msg)
-
     def handle_packet_arp_request(self, event):
+        log_color(YELLOW, "Handling an ARP Request")
         packet = event.parsed
         arp_packet = packet.payload
         in_port = event.port
@@ -226,13 +161,15 @@ class ProtoRouter(object):
         self.learn_arp_entry(in_port, packet.payload.protosrc, packet.payload.hwsrc)
 
         if addr_asked == self.nat_private_ip:
-            self.make_an_arp_reply(
+            self.openflow_sender.make_an_arp_reply(
                 arp_packet, self.nat_private_mac, addr_asked, in_port
             )
             return
 
         elif addr_asked == self.nat_public_ip:
-            self.make_an_arp_reply(arp_packet, self.nat_public_mac, addr_asked, in_port)
+            self.openflow_sender.make_an_arp_reply(
+                arp_packet, self.nat_public_mac, addr_asked, in_port
+            )
             return
 
         log_color(
@@ -262,34 +199,6 @@ class ProtoRouter(object):
             CYAN,
             f"ARP learned: {IPAddr(ip_addr)} -> {EthAddr(mac_addr)} | port={in_port} | type={port_type}",
         )
-
-    def make_an_arp_reply(self, arp_packet, mac_response, addr_response, outport):
-        reply = arp()
-        reply.hwtype = arp_packet.hwtype
-        reply.prototype = arp_packet.prototype
-        reply.hwlen = arp_packet.hwlen
-        reply.protolen = arp_packet.protolen
-        reply.opcode = arp.REPLY
-
-        reply.hwsrc = EthAddr(mac_response)
-        reply.hwdst = arp_packet.hwsrc
-        reply.protosrc = IPAddr(addr_response)
-        reply.protodst = arp_packet.protosrc
-
-        ether = ethernet()
-        ether.type = ethernet.ARP_TYPE
-        ether.dst = arp_packet.hwsrc
-        ether.src = mac_response
-        ether.payload = reply
-
-        msg = of.ofp_packet_out()
-        msg.data = ether.pack()
-        msg.actions.append(of.ofp_action_output(port=outport))
-        log_color(
-            RED,
-            f"Responding MAC: {reply.hwsrc} | From IP: {reply.protosrc} | To MAC: {reply.hwdst} | To IP: {reply.protodst}",
-        )
-        self.connection.send(msg)
 
     def handle_ip(self, event):
         packet = event.parsed
@@ -369,29 +278,38 @@ class ProtoRouter(object):
         if IPAddr(target_ip).inNetwork(self.nat_private_net, self.nat_private_mask):
             log_color(RED, "[ERROR] MAC address Searchs just for private hosts")
             return
-        raw_packet: bytes = event.ofp.data
 
         nat_entry = self.make_a_nat_entry(packet, event.port)
 
+        if nat_entry is None:
+            return
+
+        raw_packet: bytes = event.ofp.data
         pending_packet = PendingPacket(event.port, raw_packet, nat_entry)
+
+        self.add_pending_packet(target_ip, pending_packet)
+
+    def add_pending_packet(self, target_ip, pending_packet):
 
         if target_ip not in self.pending_packets:
             self.pending_packets[target_ip] = []
-            self.make_an_arp_request(target_ip, PUBLIC_PORT)
+            self.openflow_sender.make_an_arp_request(
+                target_ip, PUBLIC_PORT, self.nat_public_mac, self.nat_public_ip
+            )
 
         self.pending_packets[target_ip].append(pending_packet)
 
     def make_a_nat_entry(self, eth_packet, in_port):
         ip_packet = eth_packet.payload
-        tcp_packet = eth_packet.find("tcp")
-        udp_packet = eth_packet.find("udp")
+        tcp_packet = eth_packet.find(PROTO_TCP)
+        udp_packet = eth_packet.find(PROTO_UDP)
 
         if udp_packet is not None:
-            protocol = "udp"
-            transport_packet = eth_packet.find("udp")
+            protocol = PROTO_UDP
+            transport_packet = eth_packet.find(PROTO_UDP)
         elif tcp_packet is not None:
-            protocol = "tcp"
-            transport_packet = eth_packet.find("tcp")
+            protocol = PROTO_TCP
+            transport_packet = eth_packet.find(PROTO_TCP)
         else:
             return None
 
@@ -416,7 +334,7 @@ class ProtoRouter(object):
 
         nat_public_port = new_nat_public_port
 
-        nat_entry = self.NatEntry(
+        nat_entry = NatEntry(
             protocol,
             host_private_ip,
             host_private_port,
@@ -431,84 +349,6 @@ class ProtoRouter(object):
         log_color(YELLOW, f"New NAT Entry in pending_packets:\n {nat_entry}\n")
 
         return nat_entry
-
-    class NatEntry:
-        def __init__(
-            self,
-            protocol,
-            host_private_ip,
-            host_private_port,
-            host_private_mac,
-            private_openflow_port,
-            nat_public_port,
-            host_public_ip,
-            host_public_port,
-            host_public_mac,
-            public_openflow_port,
-        ):
-
-            self.protocol: str = protocol
-
-            self.host_private_ip: str = host_private_ip
-            self.host_private_port: int = host_private_port
-            self.host_private_mac: str = host_private_mac
-            self.private_openflow_port: int = private_openflow_port
-
-            self.nat_public_port: int = nat_public_port
-
-            self.host_public_ip: str = host_public_ip
-            self.host_public_port: int = host_public_port
-            self.host_public_mac = host_public_mac
-            self.public_openflow_port = public_openflow_port
-
-            self.last_seen = time.monotonic()
-            self.idle_timeout: int = TIME_OUT
-            self.state: str = STATE_PENDING_ARP
-
-        def __repr__(self):
-            return (
-                "NatEntry("
-                f"protocol={self.protocol}, \n"
-                f"private={self.host_private_ip}:{self.host_private_port}, \n"
-                f"private_mac={self.host_private_mac}, \n"
-                f"private_of_port={self.private_openflow_port}, \n"
-                f"nat_public_port={self.nat_public_port}, \n"
-                f"public={self.host_public_ip}:{self.host_public_port}, \n"
-                f"public_mac={self.host_public_mac}, \n"
-                f"public_of_port={self.public_openflow_port}, \n"
-                f"state={self.state} \n"
-                ")"
-            )
-
-    def make_an_arp_request(self, target_ip, outport):
-        target_ip = IPAddr(target_ip)
-
-        request = arp()
-        request.hwtype = arp.HW_TYPE_ETHERNET
-        request.prototype = arp.PROTO_TYPE_IP
-        request.hwlen = MAC_ETHER_LENGTH
-        request.protolen = IP_ADDR_LENGTH
-        request.opcode = arp.REQUEST
-
-        request.hwsrc = self.nat_public_mac
-        request.hwdst = EthAddr(MAC_UNKNOWN)
-        request.protosrc = self.nat_public_ip
-        request.protodst = target_ip
-
-        ether = ethernet()
-        ether.type = ethernet.ARP_TYPE
-        ether.dst = EthAddr(ETHER_BROADCAST)
-        ether.src = self.nat_public_mac
-        ether.payload = request
-
-        msg = of.ofp_packet_out()
-        msg.data = ether.pack()
-        msg.actions.append(of.ofp_action_output(port=outport))
-        log_color(
-            RED,
-            f"Requesting MAC | From IP: {request.protosrc} | From MAC: {request.hwsrc} | To IP: {request.protodst}",
-        )
-        self.connection.send(msg)
 
 
 def launch():
