@@ -2,7 +2,6 @@
 
 import time
 
-import pox.openflow.libopenflow_01 as of  # OpenFlow 1.0 library
 from pox.core import core  # Main POX object
 from pox.lib.addresses import EthAddr, IPAddr  # Address types
 from pox.lib.packet.arp import arp
@@ -222,48 +221,48 @@ class ProtoRouter(object):
                 self.ask_for_mac_to_public_host(event)
                 return
 
-            # Instalar Flujo Saliente
-            fm = of.ofp_flow_mod()
-            fm.idle_timeout = 10
+            # # Instalar Flujo Saliente
+            # fm = of.ofp_flow_mod()
+            # fm.idle_timeout = 10
 
-            # Filtro (Saliente)
-            fm.match.nw_src = ip_pkt.srcip
-            fm.match.dl_type = 0x800  # IPv4
-            fm.match.in_port = in_port
+            # # Filtro (Saliente)
+            # fm.match.nw_src = ip_pkt.srcip
+            # fm.match.dl_type = 0x800  # IPv4
+            # fm.match.in_port = in_port
 
-            # Acción (Saliente)
-            fm.actions.append(of.ofp_action_dl_addr.set_src(PUBLIC_MAC))
-            fm.actions.append(of.ofp_action_dl_addr.set_dst(H1_MAC))
-            fm.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
-            self.connection.send(fm)
+            # # Acción (Saliente)
+            # fm.actions.append(of.ofp_action_dl_addr.set_src(PUBLIC_MAC))
+            # fm.actions.append(of.ofp_action_dl_addr.set_dst(H1_MAC))
+            # fm.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
+            # self.connection.send(fm)
 
-            # Instalar Flujo Entrante (para respuesta)
-            fm_back = of.ofp_flow_mod()
-            fm_back.idle_timeout = 10
+            # # Instalar Flujo Entrante (para respuesta)
+            # fm_back = of.ofp_flow_mod()
+            # fm_back.idle_timeout = 10
 
-            # Filtro (Entrante)
-            fm_back.match.nw_src = ip_pkt.dstip
-            fm_back.match.nw_dst = ip_pkt.srcip
-            fm_back.match.dl_type = 0x800  # IPv4
-            fm_back.match.in_port = PUBLIC_PORT
+            # # Filtro (Entrante)
+            # fm_back.match.nw_src = ip_pkt.dstip
+            # fm_back.match.nw_dst = ip_pkt.srcip
+            # fm_back.match.dl_type = 0x800  # IPv4
+            # fm_back.match.in_port = PUBLIC_PORT
 
-            # Acción (Entrante)
-            fm_back.actions.append(of.ofp_action_dl_addr.set_src(PRIVATE_MAC))
-            fm_back.actions.append(of.ofp_action_dl_addr.set_dst(packet.src))
-            fm_back.actions.append(of.ofp_action_output(port=in_port))
-            self.connection.send(fm_back)
+            # # Acción (Entrante)
+            # fm_back.actions.append(of.ofp_action_dl_addr.set_src(PRIVATE_MAC))
+            # fm_back.actions.append(of.ofp_action_dl_addr.set_dst(packet.src))
+            # fm_back.actions.append(of.ofp_action_output(port=in_port))
+            # self.connection.send(fm_back)
 
-            # Reenviar paquete actual con MACs actualizadas (Los posteriores pasan por flujo)
-            packet.src = PUBLIC_MAC
-            packet.dst = H1_MAC
-            msg = of.ofp_packet_out()
-            msg.data = packet.pack()
-            msg.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
-            log_color(
-                CYAN,
-                f"ENVIANDO: {ip_pkt.srcip} → {ip_pkt.dstip} | MAC: {PUBLIC_MAC} → {H1_MAC} | Out Port: {PUBLIC_PORT}",
-            )
-            self.connection.send(msg)
+            # # Reenviar paquete actual con MACs actualizadas (Los posteriores pasan por flujo)
+            # packet.src = PUBLIC_MAC
+            # packet.dst = H1_MAC
+            # msg = of.ofp_packet_out()
+            # msg.data = packet.pack()
+            # msg.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
+            # log_color(
+            #     CYAN,
+            #     f"ENVIANDO: {ip_pkt.srcip} → {ip_pkt.dstip} | MAC: {PUBLIC_MAC} → {H1_MAC} | Out Port: {PUBLIC_PORT}",
+            # )
+            # self.connection.send(msg)
 
         else:
             log_color(
