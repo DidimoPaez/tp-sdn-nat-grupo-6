@@ -8,13 +8,12 @@ from pox.lib.packet.arp import arp
 from pox.lib.packet.ethernet import ethernet
 from protorouter_lib.constants import (
     INITIAL_ASSIGNED_PORT,
-    PRIVATE,
     PROTO_TCP,
     PROTO_UDP,
-    PUBLIC,
     STATE_INSTALLED,
 )
-from protorouter_lib.models.arp_entry import ArpEntry
+from protorouter_lib.managers.arp_manager import ArpManager
+from protorouter_lib.managers.nat_manager import NatManager
 from protorouter_lib.models.nat_entry import NatEntry
 from protorouter_lib.models.pending_packet import PendingPacket
 from protorouter_lib.openflow_sender import OpenFlowSender
@@ -52,12 +51,11 @@ class ProtoRouter(object):
         self.nat_public_ip = PUBLIC_IP
         self.nat_private_mac = PRIVATE_MAC
         self.nat_public_mac = PUBLIC_MAC
-        self.next_nat_public_port = INITIAL_ASSIGNED_PORT
-        self.assigned_ports = set()
-        self.pending_packets: dict = {}
+        self.arp_manager = ArpManager(self.nat_private_net, self.nat_private_mask)
+        self.nat_manager = NatManager(INITIAL_ASSIGNED_PORT)
+
         self.openflow_ports: set = set()
-        self.arp_table: dict = {}
-        self.global_counter: int = 1  # Debug counter
+        self.global_counter: int = 1 
         self.connection = connection
         connection.addListeners(self)
         self.openflow_sender = OpenFlowSender(connection=self.connection)
@@ -104,7 +102,7 @@ class ProtoRouter(object):
 
         self.learn_arp_entry(public_openflow_port, host_public_ip, host_public_mac)
 
-        pending_list = self.pending_packets.pop(host_public_ip, [])
+        pending_list = self.arp_manager.pop_pending(host_public_ip)
 
         if not pending_list:
             log_color(YELLOW, f"No pending packets for {host_public_ip}")
@@ -124,8 +122,6 @@ class ProtoRouter(object):
             log_color(GREEN, f"NAT entry completed after ARP Reply:\n{nat_entry}")
 
             self.forward_pending_packet(pending_packet)
-            # TODO(Actualizar la respectiva entrada de la self.nat_table)
-            # TODO (Generar el flujo entrante y saliente para la respectiva NAT Entry)
 
     def forward_pending_packet(self, pending_packet):
         nat_entry = pending_packet.nat_entry
@@ -178,26 +174,18 @@ class ProtoRouter(object):
         )
 
     def learn_arp_entry(self, in_port, ip_addr, mac_addr):
-        if self.arp_table.get(ip_addr):
+        entry, is_new = self.arp_manager.learn(ip_addr, mac_addr, in_port)
+
+        if is_new:
             log_color(
                 CYAN,
-                f"ARP already exists: {IPAddr(ip_addr)} -> {EthAddr(mac_addr)} | port={in_port} ",
+                f"ARP learned: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} | type={entry.port_type}",
             )
-            return
-
-        if IPAddr(ip_addr).inNetwork(self.nat_private_net, self.nat_private_mask):
-            port_type = PRIVATE
         else:
-            port_type = PUBLIC
-
-        self.arp_table[IPAddr(ip_addr)] = ArpEntry(
-            EthAddr(mac_addr), in_port, port_type
-        )
-
-        log_color(
-            CYAN,
-            f"ARP learned: {IPAddr(ip_addr)} -> {EthAddr(mac_addr)} | port={in_port} | type={port_type}",
-        )
+            log_color(
+                CYAN,
+                f"ARP already exists: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} ",
+            )
 
     def handle_ip(self, event):
         packet = event.parsed
@@ -217,7 +205,7 @@ class ProtoRouter(object):
                 f"MATCH: {ip_pkt.srcip} belongs to private network {PRIVATE_SUBNET}/{PRIVATE_MASK}",
             )
 
-            if ip_dst not in self.arp_table:
+            if not self.arp_manager.knows(ip_dst):
                 self.ask_for_mac_to_public_host(event)
                 return
 
@@ -289,14 +277,14 @@ class ProtoRouter(object):
         self.add_pending_packet(target_ip, pending_packet)
 
     def add_pending_packet(self, target_ip, pending_packet):
+        is_first_for_this_ip = self.arp_manager.queue_pending(
+            target_ip, pending_packet
+        )
 
-        if target_ip not in self.pending_packets:
-            self.pending_packets[target_ip] = []
+        if is_first_for_this_ip:
             self.openflow_sender.make_an_arp_request(
                 target_ip, PUBLIC_PORT, self.nat_public_mac, self.nat_public_ip
             )
-
-        self.pending_packets[target_ip].append(pending_packet)
 
     def make_a_nat_entry(self, eth_packet, in_port):
         ip_packet = eth_packet.payload
@@ -327,11 +315,7 @@ class ProtoRouter(object):
         host_public_mac = None
         public_openflow_port = PUBLIC_PORT
 
-        new_nat_public_port = self.next_nat_public_port
-        self.assigned_ports.add(new_nat_public_port)
-        self.next_nat_public_port += 1
-
-        nat_public_port = new_nat_public_port
+        nat_public_port = self.nat_manager.assign_public_port()
 
         nat_entry = NatEntry(
             protocol,
