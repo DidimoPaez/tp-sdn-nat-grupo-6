@@ -406,7 +406,7 @@ class ProtoRouter(object):
         # Instalar Flujo Entrante (para respuesta)
         fm_back = of.ofp_flow_mod()
         fm_back.idle_timeout = nat_entry.idle_timeout
-        fm.flags = of.OFPFF_SEND_FLOW_REM
+        fm_back.flags = of.OFPFF_SEND_FLOW_REM
 
         # Filtro (Entrante)
         fm_back.match.dl_type = 0x800  # IPv4
