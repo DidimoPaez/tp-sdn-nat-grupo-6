@@ -10,13 +10,12 @@ from protorouter_lib.constants import (
     INITIAL_ASSIGNED_PORT,
     PROTO_TCP,
     PROTO_UDP,
-    STATE_INSTALLED,
 )
 from protorouter_lib.managers.arp_manager import ArpManager
 from protorouter_lib.managers.nat_manager import NatManager
-from protorouter_lib.models.nat_entry import NatEntry
 from protorouter_lib.models.pending_packet import PendingPacket
 from protorouter_lib.openflow_sender import OpenFlowSender
+from collections import namedtuple
 
 log = core.getLogger()
 RED = "\033[31m"
@@ -42,6 +41,19 @@ H1_MAC = EthAddr(
     "00:00:00:00:00:01"
 )  # MAC del host externo (TODO: resolver mediante ARP)
 
+# Datos de un flujo saliente, parseados una sola vez del paquete IP.
+FlowInfo = namedtuple(
+    "FlowInfo",
+    [
+        "protocol",
+        "host_private_ip",
+        "host_private_port",
+        "host_private_mac",
+        "private_openflow_port",
+        "host_public_ip",
+        "host_public_port",
+    ],
+)
 
 class ProtoRouter(object):
     def __init__(self, connection):
@@ -114,10 +126,9 @@ class ProtoRouter(object):
                 log_color(RED, "[ERROR] Pending packet without NAT entry")
                 continue
 
-            nat_entry.host_public_mac = host_public_mac
-            nat_entry.public_openflow_port = public_openflow_port
-            nat_entry.state = STATE_INSTALLED
-            nat_entry.last_seen = time.monotonic()
+            self.nat_manager.mark_installed(
+                nat_entry, host_public_mac, public_openflow_port
+            )
 
             log_color(GREEN, f"NAT entry completed after ARP Reply:\n{nat_entry}")
 
@@ -266,15 +277,37 @@ class ProtoRouter(object):
             log_color(RED, "[ERROR] MAC address Searchs just for private hosts")
             return
 
-        nat_entry = self.make_a_nat_entry(packet, event.port)
-
-        if nat_entry is None:
+        flow_info = self.extract_flow_info(packet, event.port)
+        if flow_info is None:
             return
+
+        nat_entry, is_new = self.nat_manager.get_or_create_outgoing_entry(
+            flow_info.protocol,
+            flow_info.host_private_ip,
+            flow_info.host_private_port,
+            flow_info.host_private_mac,
+            flow_info.private_openflow_port,
+            flow_info.host_public_ip,
+            flow_info.host_public_port,
+        )
+
+        snapshot = self.nat_manager.debug_snapshot()
+        log_color(CYAN, f"Tabla NAT ({len(snapshot)} entrada/s): {snapshot}")
+
+        if not is_new:
+            log_color(
+                YELLOW,
+                f"Paquete repetido para un flujo ya en curso (estado={nat_entry.state}), se descarta",
+            )
+            return
+
+        log_color(YELLOW, f"New NAT Entry (PENDING):\n {nat_entry}\n")
 
         raw_packet: bytes = event.ofp.data
         pending_packet = PendingPacket(event.port, raw_packet, nat_entry)
 
         self.add_pending_packet(target_ip, pending_packet)
+
 
     def add_pending_packet(self, target_ip, pending_packet):
         is_first_for_this_ip = self.arp_manager.queue_pending(
@@ -286,56 +319,39 @@ class ProtoRouter(object):
                 target_ip, PUBLIC_PORT, self.nat_public_mac, self.nat_public_ip
             )
 
-    def make_a_nat_entry(self, eth_packet, in_port):
+    def extract_flow_info(self, eth_packet, in_port):
         ip_packet = eth_packet.payload
-        tcp_packet = eth_packet.find(PROTO_TCP)
         udp_packet = eth_packet.find(PROTO_UDP)
+        tcp_packet = eth_packet.find(PROTO_TCP)
 
         if udp_packet is not None:
             protocol = PROTO_UDP
-            transport_packet = eth_packet.find(PROTO_UDP)
+            transport_packet = udp_packet
         elif tcp_packet is not None:
             protocol = PROTO_TCP
-            transport_packet = eth_packet.find(PROTO_TCP)
+            transport_packet = tcp_packet
         else:
             return None
 
         host_private_ip = ip_packet.srcip
-        host_public_ip = ip_packet.dstip
-
         if not IPAddr(host_private_ip).inNetwork(
             self.nat_private_net, self.nat_private_mask
         ):
             return None
 
-        host_private_port = transport_packet.srcport
-        host_public_port = transport_packet.dstport
-        host_private_mac = eth_packet.src
-        private_openflow_port = in_port
-        host_public_mac = None
-        public_openflow_port = PUBLIC_PORT
-
-        nat_public_port = self.nat_manager.assign_public_port()
-
-        nat_entry = NatEntry(
-            protocol,
-            host_private_ip,
-            host_private_port,
-            host_private_mac,
-            private_openflow_port,
-            nat_public_port,
-            host_public_ip,
-            host_public_port,
-            host_public_mac,
-            public_openflow_port,
+        return FlowInfo(
+            protocol=protocol,
+            host_private_ip=host_private_ip,
+            host_private_port=transport_packet.srcport,
+            host_private_mac=eth_packet.src,
+            private_openflow_port=in_port,
+            host_public_ip=ip_packet.dstip,
+            host_public_port=transport_packet.dstport,
         )
-        log_color(YELLOW, f"New NAT Entry in pending_packets:\n {nat_entry}\n")
-
-        return nat_entry
 
 
 def launch():
-
+    
     def start_switch(event):
         log_color(YELLOW, f"Iniciando ProtoRouter para Switch {event.connection.dpid}")
         ProtoRouter(event.connection)

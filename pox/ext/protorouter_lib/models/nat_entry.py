@@ -36,6 +36,12 @@ class NatEntry:
         self.idle_timeout: int = TIME_OUT
         self.state: str = STATE_PENDING_ARP
 
+    def touch(self):
+        self.last_seen = time.monotonic()
+
+    def is_stale(self) -> bool:
+        return (time.monotonic() - self.last_seen) > self.idle_timeout
+
     def __repr__(self):
         return (
             "NatEntry("
