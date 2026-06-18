@@ -98,6 +98,24 @@ class NatManager:
     def _release_port(self, port: int):
         self._free_ports.append(port)
 
+    def handle_flow_removed_outgoing(
+        self, protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
+    ):
+        entry = self._find_outgoing(
+            protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
+        )
+        if entry is None:
+            return
+        if entry.mark_flow_removed("outgoing"):
+            self._remove_entry(entry.nat_public_port)
+
+    def handle_flow_removed_incoming(self, nat_public_port):
+        entry = self._entries.get(nat_public_port)
+        if entry is None:
+            return
+        if entry.mark_flow_removed("incoming"):
+            self._remove_entry(nat_public_port)
+
     def debug_snapshot(self):
         """Resumen legible de la tabla actual, para debug/CLI."""
         return [

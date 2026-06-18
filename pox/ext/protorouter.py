@@ -10,12 +10,16 @@ from protorouter_lib.constants import (
     INITIAL_ASSIGNED_PORT,
     PROTO_TCP,
     PROTO_UDP,
+    PROTO_IP_NUMBER,
+    IP_NUMBER_TO_PROTO,
 )
+import pox.openflow.libopenflow_01 as of
 from protorouter_lib.managers.arp_manager import ArpManager
 from protorouter_lib.managers.nat_manager import NatManager
 from protorouter_lib.models.pending_packet import PendingPacket
 from protorouter_lib.openflow_sender import OpenFlowSender
 from collections import namedtuple
+
 
 log = core.getLogger()
 RED = "\033[31m"
@@ -119,6 +123,7 @@ class ProtoRouter(object):
         if not pending_list:
             log_color(YELLOW, f"No pending packets for {host_public_ip}")
             return
+
         for pending_packet in pending_list:
             nat_entry = pending_packet.nat_entry
 
@@ -126,36 +131,9 @@ class ProtoRouter(object):
                 log_color(RED, "[ERROR] Pending packet without NAT entry")
                 continue
 
-            self.nat_manager.mark_installed(
-                nat_entry, host_public_mac, public_openflow_port
+            self.complete_and_forward(
+                nat_entry, host_public_mac, public_openflow_port, pending_packet.raw_packet
             )
-
-            log_color(GREEN, f"NAT entry completed after ARP Reply:\n{nat_entry}")
-
-            self.forward_pending_packet(pending_packet)
-
-    def forward_pending_packet(self, pending_packet):
-        nat_entry = pending_packet.nat_entry
-
-        if nat_entry is None:
-            log_color(RED, "[ERROR] NAT Entry does not exist")
-            return
-
-        if nat_entry.host_public_mac is None:
-            log_color(RED, "[ERROR] Public host MAC is still unknown")
-            return
-        self.openflow_sender.forward_of_data(
-            pending_packet.raw_packet,
-            self.nat_public_mac,
-            self.nat_public_ip,
-            nat_entry.nat_public_port,
-            nat_entry.public_openflow_port,
-            nat_entry.host_public_mac,
-            nat_entry.host_public_ip,
-            nat_entry.host_public_port,
-            nat_entry.host_private_ip,
-            nat_entry.host_private_port,
-        )
 
     def handle_packet_arp_request(self, event):
         log_color(YELLOW, "Handling an ARP Request")
@@ -220,48 +198,7 @@ class ProtoRouter(object):
                 self.ask_for_mac_to_public_host(event)
                 return
 
-            # # Instalar Flujo Saliente
-            # fm = of.ofp_flow_mod()
-            # fm.idle_timeout = 10
-
-            # # Filtro (Saliente)
-            # fm.match.nw_src = ip_pkt.srcip
-            # fm.match.dl_type = 0x800  # IPv4
-            # fm.match.in_port = in_port
-
-            # # Acción (Saliente)
-            # fm.actions.append(of.ofp_action_dl_addr.set_src(PUBLIC_MAC))
-            # fm.actions.append(of.ofp_action_dl_addr.set_dst(H1_MAC))
-            # fm.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
-            # self.connection.send(fm)
-
-            # # Instalar Flujo Entrante (para respuesta)
-            # fm_back = of.ofp_flow_mod()
-            # fm_back.idle_timeout = 10
-
-            # # Filtro (Entrante)
-            # fm_back.match.nw_src = ip_pkt.dstip
-            # fm_back.match.nw_dst = ip_pkt.srcip
-            # fm_back.match.dl_type = 0x800  # IPv4
-            # fm_back.match.in_port = PUBLIC_PORT
-
-            # # Acción (Entrante)
-            # fm_back.actions.append(of.ofp_action_dl_addr.set_src(PRIVATE_MAC))
-            # fm_back.actions.append(of.ofp_action_dl_addr.set_dst(packet.src))
-            # fm_back.actions.append(of.ofp_action_output(port=in_port))
-            # self.connection.send(fm_back)
-
-            # # Reenviar paquete actual con MACs actualizadas (Los posteriores pasan por flujo)
-            # packet.src = PUBLIC_MAC
-            # packet.dst = H1_MAC
-            # msg = of.ofp_packet_out()
-            # msg.data = packet.pack()
-            # msg.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
-            # log_color(
-            #     CYAN,
-            #     f"ENVIANDO: {ip_pkt.srcip} → {ip_pkt.dstip} | MAC: {PUBLIC_MAC} → {H1_MAC} | Out Port: {PUBLIC_PORT}",
-            # )
-            # self.connection.send(msg)
+            self.forward_with_known_mac(event)
 
         else:
             log_color(
@@ -308,6 +245,41 @@ class ProtoRouter(object):
 
         self.add_pending_packet(target_ip, pending_packet)
 
+    def forward_with_known_mac(self, event):
+        packet = event.parsed
+        ip_packet = packet.payload
+        target_ip = ip_packet.dstip
+
+        arp_entry = self.arp_manager.lookup(target_ip)
+        if arp_entry is None:
+            self.ask_for_mac_to_public_host(event)
+            return
+
+        flow_info = self.extract_flow_info(packet, event.port)
+        if flow_info is None:
+            return
+
+        nat_entry, is_new = self.nat_manager.get_or_create_outgoing_entry(
+            flow_info.protocol,
+            flow_info.host_private_ip,
+            flow_info.host_private_port,
+            flow_info.host_private_mac,
+            flow_info.private_openflow_port,
+            flow_info.host_public_ip,
+            flow_info.host_public_port,
+        )
+
+        if not is_new:
+            log_color(
+                YELLOW,
+                f"Paquete con MAC ya conocida pero flujo ya en curso (estado={nat_entry.state}), se descarta",
+            )
+            return
+
+        raw_packet: bytes = event.ofp.data
+        self.complete_and_forward(
+            nat_entry, arp_entry.mac, arp_entry.switch_openflow_port, raw_packet
+        )
 
     def add_pending_packet(self, target_ip, pending_packet):
         is_first_for_this_ip = self.arp_manager.queue_pending(
@@ -349,6 +321,160 @@ class ProtoRouter(object):
             host_public_port=transport_packet.dstport,
         )
 
+    """
+        Instala en el switch las dos reglas (saliente y entrante) para
+        esta NatEntry ya resuelta. Es la versión PAT del bloque base de
+        instalación de flujos: misma estrategia (dos flow_mod), pero con
+        match por 5-tupla y acciones de NAT en vez de un solo par de MACs
+        fijo.
+        codigo original de hugo :
+        """
+         # # Instalar Flujo Saliente
+            # fm = of.ofp_flow_mod()
+            # fm.idle_timeout = 10
+
+            # # Filtro (Saliente)
+            # fm.match.nw_src = ip_pkt.srcip
+            # fm.match.dl_type = 0x800  # IPv4
+            # fm.match.in_port = in_port
+
+            # # Acción (Saliente)
+            # fm.actions.append(of.ofp_action_dl_addr.set_src(PUBLIC_MAC))
+            # fm.actions.append(of.ofp_action_dl_addr.set_dst(H1_MAC))
+            # fm.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
+            # self.connection.send(fm)
+
+            # # Instalar Flujo Entrante (para respuesta)
+            # fm_back = of.ofp_flow_mod()
+            # fm_back.idle_timeout = 10
+
+            # # Filtro (Entrante)
+            # fm_back.match.nw_src = ip_pkt.dstip
+            # fm_back.match.nw_dst = ip_pkt.srcip
+            # fm_back.match.dl_type = 0x800  # IPv4
+            # fm_back.match.in_port = PUBLIC_PORT
+
+            # # Acción (Entrante)
+            # fm_back.actions.append(of.ofp_action_dl_addr.set_src(PRIVATE_MAC))
+            # fm_back.actions.append(of.ofp_action_dl_addr.set_dst(packet.src))
+            # fm_back.actions.append(of.ofp_action_output(port=in_port))
+            # self.connection.send(fm_back)
+
+            # # Reenviar paquete actual con MACs actualizadas (Los posteriores pasan por flujo)
+            # packet.src = PUBLIC_MAC
+            # packet.dst = H1_MAC
+            # msg = of.ofp_packet_out()
+            # msg.data = packet.pack()
+            # msg.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
+            # log_color(
+            #     CYAN,
+            #     f"ENVIANDO: {ip_pkt.srcip} → {ip_pkt.dstip} | MAC: {PUBLIC_MAC} → {H1_MAC} | Out Port: {PUBLIC_PORT}",
+            # )
+            # self.connection.send(msg)
+
+    def install_flows(self, nat_entry):
+        ip_proto = PROTO_IP_NUMBER.get(nat_entry.protocol)
+        if ip_proto is None:
+            log_color(
+                RED,
+                f"[ERROR] Protocolo desconocido para instalar flujo: {nat_entry.protocol}",
+            )
+            return
+
+        # Instalar Flujo Saliente
+        fm = of.ofp_flow_mod()
+        fm.idle_timeout = nat_entry.idle_timeout
+        fm.flags = of.OFPFF_SEND_FLOW_REM
+
+        # Filtro (Saliente)
+        fm.match.dl_type = 0x800  # IPv4
+        fm.match.in_port = nat_entry.private_openflow_port
+        fm.match.nw_proto = ip_proto
+        fm.match.nw_src = nat_entry.host_private_ip
+        fm.match.nw_dst = nat_entry.host_public_ip
+        fm.match.tp_src = nat_entry.host_private_port
+        fm.match.tp_dst = nat_entry.host_public_port
+
+        # Acción (Saliente)
+        fm.actions.append(of.ofp_action_dl_addr.set_src(self.nat_public_mac))
+        fm.actions.append(of.ofp_action_dl_addr.set_dst(nat_entry.host_public_mac))
+        fm.actions.append(of.ofp_action_nw_addr.set_src(self.nat_public_ip))
+        fm.actions.append(of.ofp_action_tp_port.set_src(nat_entry.nat_public_port))
+        fm.actions.append(of.ofp_action_output(port=nat_entry.public_openflow_port))
+        self.connection.send(fm)
+
+        # Instalar Flujo Entrante (para respuesta)
+        fm_back = of.ofp_flow_mod()
+        fm_back.idle_timeout = nat_entry.idle_timeout
+        fm.flags = of.OFPFF_SEND_FLOW_REM
+
+        # Filtro (Entrante)
+        fm_back.match.dl_type = 0x800  # IPv4
+        fm_back.match.in_port = nat_entry.public_openflow_port
+        fm_back.match.nw_proto = ip_proto
+        fm_back.match.nw_src = nat_entry.host_public_ip
+        fm_back.match.nw_dst = self.nat_public_ip
+        fm_back.match.tp_src = nat_entry.host_public_port
+        fm_back.match.tp_dst = nat_entry.nat_public_port
+
+        # Acción (Entrante)
+        fm_back.actions.append(of.ofp_action_dl_addr.set_src(self.nat_private_mac))
+        fm_back.actions.append(of.ofp_action_dl_addr.set_dst(nat_entry.host_private_mac))
+        fm_back.actions.append(of.ofp_action_nw_addr.set_dst(nat_entry.host_private_ip))
+        fm_back.actions.append(of.ofp_action_tp_port.set_dst(nat_entry.host_private_port))
+        fm_back.actions.append(of.ofp_action_output(port=nat_entry.private_openflow_port))
+        self.connection.send(fm_back)
+
+        log_color(
+            GREEN, f"Flujos instalados para puerto público {nat_entry.nat_public_port}"
+        )
+
+    """
+        Termina de resolver una NatEntry (ya con MAC pública conocida),
+        instala sus flujos y reenvía el paquete que la disparó — el
+        equivalente al "Reenviar paquete actual" del bloque base, pero
+        usando openflow_sender.forward_of_data (que ya traduce IP/puerto,
+        no solo MAC)
+    """
+    def complete_and_forward(self, nat_entry, host_public_mac, public_openflow_port, raw_packet):
+        self.nat_manager.mark_installed(nat_entry, host_public_mac, public_openflow_port)
+        self.install_flows(nat_entry)
+
+        log_color(GREEN, f"NAT entry completed:\n{nat_entry}")
+
+        self.openflow_sender.forward_of_data(
+            raw_packet,
+            self.nat_public_mac,
+            self.nat_public_ip,
+            nat_entry.nat_public_port,
+            nat_entry.public_openflow_port,
+            nat_entry.host_public_mac,
+            nat_entry.host_public_ip,
+            nat_entry.host_public_port,
+            nat_entry.host_private_ip,
+            nat_entry.host_private_port,
+        )
+    
+    def _handle_FlowRemoved(self, event):
+        match = event.ofp.match
+
+        if match.nw_dst == self.nat_public_ip:
+            nat_public_port = match.tp_dst
+            self.nat_manager.handle_flow_removed_incoming(nat_public_port)
+            log_color(
+                YELLOW, f"Flujo entrante removido por el switch (puerto público {nat_public_port})"
+            )
+        else:
+            protocol = IP_NUMBER_TO_PROTO.get(match.nw_proto)
+            if protocol is None:
+                return
+            self.nat_manager.handle_flow_removed_outgoing(
+                protocol, match.nw_src, match.tp_src, match.nw_dst, match.tp_dst
+            )
+            log_color(
+                YELLOW,
+                f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})",
+            )
 
 def launch():
     

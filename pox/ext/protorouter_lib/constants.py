@@ -15,3 +15,8 @@ INITIAL_ASSIGNED_PORT: int = 10000
 
 PROTO_TCP = "tcp"
 PROTO_UDP = "udp"
+PROTO_IP_NUMBER = {
+    PROTO_TCP: 6,
+    PROTO_UDP: 17,
+}
+IP_NUMBER_TO_PROTO = {v: k for k, v in PROTO_IP_NUMBER.items()} # nombre de protocolo interno.

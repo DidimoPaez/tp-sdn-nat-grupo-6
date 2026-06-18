@@ -1,6 +1,6 @@
 import time
 
-from protorouter_lib.constants import STATE_PENDING_ARP, TIME_OUT
+from protorouter_lib.constants import STATE_INSTALLED, STATE_PENDING_ARP, TIME_OUT
 
 
 class NatEntry:
@@ -35,11 +35,22 @@ class NatEntry:
         self.last_seen = time.monotonic()
         self.idle_timeout: int = TIME_OUT
         self.state: str = STATE_PENDING_ARP
+        self.outgoing_flow_removed = False
+        self.incoming_flow_removed = False
 
     def touch(self):
         self.last_seen = time.monotonic()
+    
+    def mark_flow_removed(self, direction: str) -> bool:
+        if direction == "outgoing":
+            self.outgoing_flow_removed = True
+        elif direction == "incoming":
+            self.incoming_flow_removed = True
+        return self.outgoing_flow_removed and self.incoming_flow_removed
 
     def is_stale(self) -> bool:
+        if self.state == STATE_INSTALLED:
+            return False
         return (time.monotonic() - self.last_seen) > self.idle_timeout
 
     def __repr__(self):
