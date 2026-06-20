@@ -8,33 +8,27 @@ La ideas es que aca tambien esten los metodos de pregutna y respuesta tambien.
 .
 """
 
-from __future__ import annotations
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ext.protorouter_lib.managers.arp_manager import ArpManager
-
-from protorouter_lib.models.nat_entry import NatEntry
-from protorouter_lib.models.pending_packet import PendingPacket
+from pox.ext.protorouter_lib.managers.flow_manager import FlowManager
 from protorouter_lib.openflow_sender import OpenFlowSender
 
+from protorouter_lib.models.pending_packet import PendingPacket
 from protorouter_lib.constants import *
+from protorouter_lib.managers.nat_table_manager import NatTableManager
+from protorouter_lib.managers.arp_table_manager import ArpTableManager
 from ext.protorouter_lib.managers.controller_config import ControllerConfig
 from ext.protorouter_lib.utils.logger import Logger
 
 
 class NatManager:
-    def __init__(self, connection, initial_port: int, of_sender: OpenFlowSender):
+    def __init__(self, flow_manager: FlowManager, initial_port: int, of_sender: OpenFlowSender, nat_table_manager: NatTableManager, arp_table_manager: ArpTableManager):
         self.cfg = ControllerConfig.get()
-        self.connection = connection
         self.of_sender = of_sender
         self._next_port = initial_port
         self._free_ports: list = []  # puertos liberados, listos para reusar
         self._entries: dict = {}  # nat_public_port -> NatEntry
-        self.arp_manager: ArpManager | None = None
-
-    def set_arp_manager(self, manager):
-        self.arp_manager = manager
+        self.nat_table_manager: NatTableManager = nat_table_manager
+        self.arp_table_manager: ArpTableManager = arp_table_manager
+        self.flow_manager: FlowManager = flow_manager
 
     def handle_ip(self, event):
         packet = event.parsed
@@ -52,7 +46,7 @@ class NatManager:
                 f"MATCH: {ip_pkt.srcip} belongs to private network {PRIVATE_SUBNET}/{PRIVATE_MASK}",
             )
 
-            if not self.arp_manager.knows(ip_dst):
+            if not self.arp_table_manager.contains(ip_dst):
                 self.ask_for_mac_to_public_host(event)
                 return
 
@@ -75,7 +69,7 @@ class NatManager:
         if flow_info is None:
             return
 
-        nat_entry, is_new = self.get_or_create_outgoing_entry(
+        nat_entry, is_new = self.nat_table_manager.get_or_create_outgoing_entry(
             flow_info.protocol,
             flow_info.host_private_ip,
             flow_info.host_private_port,
@@ -85,7 +79,7 @@ class NatManager:
             flow_info.host_public_port,
         )
 
-        snapshot = self.debug_snapshot()
+        snapshot = self.nat_table_manager.debug_snapshot()
         Logger.info_cyan(f"Tabla NAT ({len(snapshot)} entrada/s): {snapshot}")
 
         if not is_new:
@@ -104,7 +98,7 @@ class NatManager:
         ip_packet = packet.payload
         target_ip = ip_packet.dstip
 
-        arp_entry = self.arp_manager.lookup(target_ip)
+        arp_entry = self.arp_table_manager.get(target_ip)
         if arp_entry is None:
             self.ask_for_mac_to_public_host(event)
             return
@@ -113,7 +107,7 @@ class NatManager:
         if flow_info is None:
             return
 
-        nat_entry, is_new = self.get_or_create_outgoing_entry(
+        nat_entry, is_new = self.nat_table_manager.get_or_create_outgoing_entry(
             flow_info.protocol,
             flow_info.host_private_ip,
             flow_info.host_private_port,
@@ -130,12 +124,27 @@ class NatManager:
             return
 
         raw_packet: bytes = event.ofp.data
-        self.arp_manager.complete_and_forward(
-            nat_entry, arp_entry.mac, arp_entry.switch_openflow_port, raw_packet
+
+        self.nat_table_manager.mark_installed(nat_entry, arp_entry.mac, arp_entry.switch_openflow_port)
+        self.flow_manager.install_flows(nat_entry)
+
+        Logger.info_green(f"NAT entry completed:\n{nat_entry}")
+
+        self.of_sender.forward_of_data(
+            raw_packet,
+            self.cfg.nat_public_mac,
+            self.cfg.nat_public_ip,
+            nat_entry.nat_public_port,
+            nat_entry.public_openflow_port,
+            nat_entry.host_public_mac,
+            nat_entry.host_public_ip,
+            nat_entry.host_public_port,
+            nat_entry.host_private_ip,
+            nat_entry.host_private_port,
         )
 
     def add_pending_packet(self, target_ip, pending_packet):
-        is_first_for_this_ip = self.arp_manager.queue_pending(
+        is_first_for_this_ip = self.arp_table_manager.queue_pending(
             target_ip, pending_packet
         )
 
@@ -174,112 +183,13 @@ class NatManager:
             host_public_port=transport_packet.dstport,
         )
 
-    def get_or_create_outgoing_entry(
-        self,
-        protocol,
-        host_private_ip,
-        host_private_port,
-        host_private_mac,
-        private_openflow_port,
-        host_public_ip,
-        host_public_port,
-    ):
-        self._evict_stale_entries()
-
-        existing = self._find_outgoing(
-            protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
-        )
-        if existing is not None:
-            return existing, False
-
-        nat_public_port = self._assign_public_port()
-        entry = NatEntry(
-            protocol,
-            host_private_ip,
-            host_private_port,
-            host_private_mac,
-            private_openflow_port,
-            nat_public_port,
-            host_public_ip,
-            host_public_port,
-            None,  # host_public_mac: todavia no se conoce
-            None,  # public_openflow_port: todavia no se conoce
-        )
-        self._entries[nat_public_port] = entry
-        return entry, True
-
-    def lookup_by_incoming(self, nat_public_port):
-        self._evict_stale_entries()
-        return self._entries.get(nat_public_port)
-
-    def mark_installed(self, entry, host_public_mac, public_openflow_port):
-        entry.host_public_mac = host_public_mac
-        entry.public_openflow_port = public_openflow_port
-        entry.state = STATE_INSTALLED
-        entry.touch()
-
-
-    def _find_outgoing(
-        self, protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
-    ):
-        for entry in self._entries.values():
-            if (
-                entry.protocol == protocol
-                and entry.host_private_ip == host_private_ip
-                and entry.host_private_port == host_private_port
-                and entry.host_public_ip == host_public_ip
-                and entry.host_public_port == host_public_port
-            ):
-                return entry
-        return None
-
-    def _evict_stale_entries(self):
-        expired_ports = [
-            port for port, entry in self._entries.items() if entry.is_stale()
-        ]
-        for port in expired_ports:
-            self._remove_entry(port)
-
-    def _remove_entry(self, nat_public_port):
-        self._entries.pop(nat_public_port, None)
-        self._release_port(nat_public_port)
-
-    def _assign_public_port(self) -> int:
-        if self._free_ports:
-            return self._free_ports.pop()
-        port = self._next_port
-        self._next_port += 1
-        return port
-
-    def _release_port(self, port: int):
-        self._free_ports.append(port)
-
     def handle_flow_removed_outgoing(
         self, protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
     ):
-        entry = self._find_outgoing(
+        entry = self.nat_table_manager._find_outgoing(
             protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
         )
         if entry is None:
             return
         if entry.mark_flow_removed("outgoing"):
-            self._remove_entry(entry.nat_public_port)
-
-    def handle_flow_removed_incoming(self, nat_public_port):
-        entry = self._entries.get(nat_public_port)
-        if entry is None:
-            return
-        if entry.mark_flow_removed("incoming"):
-            self._remove_entry(nat_public_port)
-
-    def debug_snapshot(self):
-        """Resumen legible de la tabla actual, para debug/CLI."""
-        return [
-            {
-                "nat_public_port": port,
-                "private": f"{entry.host_private_ip}:{entry.host_private_port}",
-                "public": f"{entry.host_public_ip}:{entry.host_public_port}",
-                "state": entry.state,
-            }
-            for port, entry in self._entries.items()
-        ]
+            self.nat_table_manager._remove_entry(entry.nat_public_port)
