@@ -28,7 +28,7 @@ class NatManager:
         host_public_ip,
         host_public_port,
     ):
-        self._evict_stale_entries()
+        self.evict_stale_entries()
 
         existing = self._find_outgoing(
             protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
@@ -53,7 +53,7 @@ class NatManager:
         return entry, True
 
     def lookup_by_incoming(self, nat_public_port):
-        self._evict_stale_entries()
+        self.evict_stale_entries()
         return self._entries.get(nat_public_port)
 
     def mark_installed(self, entry, host_public_mac, public_openflow_port):
@@ -77,12 +77,13 @@ class NatManager:
                 return entry
         return None
 
-    def _evict_stale_entries(self):
+    def evict_stale_entries(self):
         expired_ports = [
             port for port, entry in self._entries.items() if entry.is_stale()
         ]
         for port in expired_ports:
             self._remove_entry(port)
+        return expired_ports
 
     def _remove_entry(self, nat_public_port):
         self._entries.pop(nat_public_port, None)

@@ -1,6 +1,6 @@
 # Import some POX stuff
 
-import time
+from pox.lib.recoco import Timer
 
 from pox.core import core  # Main POX object
 from pox.lib.addresses import EthAddr, IPAddr  # Address types
@@ -76,6 +76,29 @@ class ProtoRouter(object):
         connection.addListeners(self)
         self.openflow_sender = OpenFlowSender(connection=self.connection)
 
+        # Intenta cada 5 segundos para fijar si hay algo para limpiar de la tabla de ARP  
+        Timer(5, self.cleanup_arp_table, recurring=True)
+
+    def cleanup_arp_table(self):
+        expired_arp_entries = self.arp_manager.evict_stale_entries()
+
+        if expired_arp_entries:
+            for ip, entry in expired_arp_entries:
+                log_color(
+                    YELLOW,
+                    f"ARP entry expired and removed: "
+                    f"{ip} -> {entry.mac} | "
+                    f"port={entry.switch_openflow_port} | "
+                    f"type={entry.port_type}",
+                )
+
+            log_color(
+                CYAN,
+                f"Tabla ARP después de limpiar "
+                f"({len(self.arp_manager.debug_snapshot())} entrada/s): "
+                f"{self.arp_manager.debug_snapshot()}",
+            )
+
     def _handle_PacketIn(self, event):
         log_color(RED, f"_handle_PacketIn has been called {self.global_counter} times")
         self.global_counter += 1
@@ -95,7 +118,7 @@ class ProtoRouter(object):
             self.handle_arp_type(event)
 
         else:
-            log_color(RED, "Packet ignored: protocol received: {packet.type}.")
+            log_color(RED, f"Packet ignored: protocol received: {packet.type}.")
 
     def handle_arp_type(self, event):
         packet = event.parsed
@@ -475,6 +498,7 @@ class ProtoRouter(object):
                 YELLOW,
                 f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})",
             )
+
 
 def launch():
     

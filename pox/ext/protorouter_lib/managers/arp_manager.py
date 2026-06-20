@@ -40,6 +40,10 @@ class ArpManager:
         ip_addr = IPAddr(ip_addr)
         existing = self._table.get(ip_addr)
         if existing is not None:
+            existing.mac = EthAddr(mac_addr)
+            existing.switch_openflow_port = in_port
+            existing.port_type = port_type
+            existing.touch()
             return existing, False
 
         port_type = (
@@ -54,6 +58,49 @@ class ArpManager:
     # Copia de la tabla actual, para debug
     def all_entries(self) -> dict:
         return dict(self._table)
+    
+    def evict_stale_entries(self):
+        # expired_ips = [
+        #     ip for ip, entry in self._table.items()
+        #     if entry.is_stale()
+        # ]
+
+        # for ip in expired_ips:
+        #     self._table.pop(ip, None)
+
+        # return expired_ips
+
+        expired_entries = [
+            (ip, entry)
+            for ip, entry in self._table.items()
+            if entry.is_stale()
+        ]
+
+        for ip, _entry in expired_entries:
+            self._table.pop(ip, None)
+
+        return expired_entries
+    
+    # Aprende o refresca una entrada de la tabla ARP 
+    def learn(self, ip_addr, mac_addr, in_port):
+        ip_addr = IPAddr(ip_addr)
+
+        port_type = (
+            PRIVATE
+            if ip_addr.inNetwork(self._private_network, self._private_mask)
+            else PUBLIC
+        )
+
+        existing = self._table.get(ip_addr)
+
+        # Si sigue existiendo la entrada, actualizo el tiempo 
+        if existing is not None:
+            existing.update(EthAddr(mac_addr), in_port, port_type)
+            return existing, False
+
+        entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
+        self._table[ip_addr] = entry
+        return entry, True
 
 
     # Paquetes pendientes de resolución ARP
@@ -69,3 +116,14 @@ class ArpManager:
 
     def has_pending(self, ip_addr) -> bool:
         return IPAddr(ip_addr) in self._pending
+    
+    def debug_snapshot(self):
+        return [
+            {
+                "ip": str(ip),
+                "mac": str(entry.mac),
+                "openflow_port": entry.switch_openflow_port,
+                "type": entry.port_type,
+            }
+            for ip, entry in self._table.items()
+        ]
