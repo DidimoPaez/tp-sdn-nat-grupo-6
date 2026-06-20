@@ -13,7 +13,7 @@ class ProtoRouter(object):
         self.cfg = ControllerConfig.get()
         self.connection = connection
         self.openflow_sender = OpenFlowSender(connection=self.connection)
-        self.nat_manager = NatManager(INITIAL_ASSIGNED_PORT)
+        self.nat_manager = NatManager(self.connection, INITIAL_ASSIGNED_PORT, self.openflow_sender)
         self.arp_manager = ArpManager(self.nat_manager, self.cfg.nat_private_net, self.cfg.nat_private_mask, connection, self.openflow_sender)
 
         self.nat_manager.set_arp_manager(self.arp_manager)
