@@ -22,15 +22,13 @@ import pox.openflow.libopenflow_01 as of
 from ext.protorouter_lib.utils.logger import Logger
 from ext.protorouter_lib.constants import *
 from ext.protorouter_lib.managers.controller_config import ControllerConfig
-from ext.protorouter_lib.managers.nat_manager import NatManager
 from ext.protorouter_lib.managers.arp_table_manager import ArpTableManager
 from ext.protorouter_lib.managers.flow_manager import FlowManager
 
 
 class ArpManager:
-    def __init__(self, nat_manager: NatManager, arp_table_manager: ArpTableManager, nat_table_manager: NatTableManager, flow_manager: FlowManager, of_sender: OpenFlowSender):
+    def __init__(self, arp_table_manager: ArpTableManager, nat_table_manager: NatTableManager, flow_manager: FlowManager, of_sender: OpenFlowSender):
         self.cfg = ControllerConfig.get()
-        self.nat_manager = nat_manager
         self.flow_manager: FlowManager = flow_manager
         self.of_sender = of_sender
         self.arp_table_manager: ArpTableManager = arp_table_manager

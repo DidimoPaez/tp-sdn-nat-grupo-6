@@ -20,7 +20,7 @@ from ext.protorouter_lib.utils.logger import Logger
 
 
 class NatManager:
-    def __init__(self, flow_manager: FlowManager, initial_port: int, of_sender: OpenFlowSender, nat_table_manager: NatTableManager, arp_table_manager: ArpTableManager):
+    def __init__(self, arp_table_manager: ArpTableManager, nat_table_manager: NatTableManager, flow_manager: FlowManager, initial_port: int, of_sender: OpenFlowSender):
         self.cfg = ControllerConfig.get()
         self.of_sender = of_sender
         self._next_port = initial_port

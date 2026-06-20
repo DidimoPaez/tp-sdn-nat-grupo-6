@@ -5,6 +5,9 @@ from protorouter_lib.managers.arp_manager import ArpManager
 from protorouter_lib.managers.nat_manager import NatManager
 from protorouter_lib.openflow_sender import OpenFlowSender
 
+from ext.protorouter_lib.managers.nat_table_manager import NatTableManager
+from ext.protorouter_lib.managers.arp_table_manager import ArpTableManager
+from ext.protorouter_lib.managers.flow_manager import FlowManager
 from ext.protorouter_lib.utils.logger import Logger
 from ext.protorouter_lib.managers.controller_config import ControllerConfig
 
@@ -13,10 +16,11 @@ class ProtoRouter(object):
         self.cfg = ControllerConfig.get()
         self.connection = connection
         self.openflow_sender = OpenFlowSender(connection=self.connection)
-        self.nat_manager = NatManager(self.connection, INITIAL_ASSIGNED_PORT, self.openflow_sender)
-        self.arp_manager = ArpManager(self.nat_manager, self.cfg.nat_private_net, self.cfg.nat_private_mask, connection, self.openflow_sender)
-
-        self.nat_manager.set_arp_manager(self.arp_manager)
+        self.arp_table_manager = ArpTableManager(self.cfg.nat_private_net, self.cfg.nat_private_mask)
+        self.nat_table_manager = NatTableManager(INITIAL_ASSIGNED_PORT, self.arp_table_manager)
+        self.flow_manager = FlowManager(self.connection)
+        self.nat_manager = NatManager(self.arp_table_manager, self.nat_table_manager, self.flow_manager, INITIAL_ASSIGNED_PORT, self.openflow_sender)
+        self.arp_manager = ArpManager(self.arp_table_manager, self.nat_table_manager, self.flow_manager, self.openflow_sender)
 
         self.openflow_ports: set = set()
         self.global_counter: int = 1 
