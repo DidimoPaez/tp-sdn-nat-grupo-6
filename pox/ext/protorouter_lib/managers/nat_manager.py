@@ -193,3 +193,6 @@ class NatManager:
             return
         if entry.mark_flow_removed("outgoing"):
             self.nat_table_manager._remove_entry(entry.nat_public_port)
+
+    def handle_flow_removed_incoming(self, nat_public_port):
+        self.nat_table_manager.handle_flow_removed_incoming(nat_public_port)
