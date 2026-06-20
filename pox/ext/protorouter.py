@@ -28,7 +28,7 @@ class ProtoRouter(object):
         self.global_counter: int = 1 
         connection.addListeners(self)
 
-    def _handle_ConnectionUp(event):
+    def _handle_ConnectionUp(self, event):
         dpid = event.dpid
         connection = event.connection
 
