@@ -1,10 +1,12 @@
 from pox.core import core
 from pox.lib.packet.ethernet import ethernet
+import pox.openflow.libopenflow_01 as of
+from pox.lib.util import dpidToStr
+
 from protorouter_lib.constants import *
 from protorouter_lib.managers.arp_manager import ArpManager
 from protorouter_lib.managers.nat_manager import NatManager
 from protorouter_lib.openflow_sender import OpenFlowSender
-
 from ext.protorouter_lib.managers.nat_table_manager import NatTableManager
 from ext.protorouter_lib.managers.arp_table_manager import ArpTableManager
 from ext.protorouter_lib.managers.flow_manager import FlowManager
@@ -25,6 +27,42 @@ class ProtoRouter(object):
         self.openflow_ports: set = set()
         self.global_counter: int = 1 
         connection.addListeners(self)
+
+    def _handle_ConnectionUp(event):
+        dpid = event.dpid
+        connection = event.connection
+
+        Logger.info_cyan("=== CONNECTION UP ===")
+        Logger.info_cyan("Switch DPID: %s", dpidToStr(dpid))
+        Logger.info_cyan("Remote: %s", connection)
+
+        # 1. Verificar versión OpenFlow
+        try:
+            Logger.info_cyan("OF version: %s", connection.ofnexus.ofp_version)
+        except:
+            Logger.warn("No se pudo obtener versión OpenFlow")
+
+        # 2. Verificar que el switch responde a barrier (sanity check)
+        try:
+            msg = of.ofp_barrier_request()
+            connection.send(msg)
+            Logger.info_cyan("Barrier request enviado OK")
+        except Exception as e:
+            Logger.error("Error enviando barrier: %s", e)
+
+        # 3. Instalar flow por defecto (MUY importante para debug)
+        # Esto evita que paquetes "raros" rompan todo o saturen PacketIn
+        try:
+            fm = of.ofp_flow_mod()
+            fm.priority = 0
+            fm.match = of.ofp_match()  # match vacío = todo
+            fm.actions.append(of.ofp_action_output(port=of.OFPP_CONTROLLER))
+            connection.send(fm)
+            Logger.info_cyan("Flow default instalado (table-miss -> controller)")
+        except Exception as e:
+            Logger.error("Error instalando flow default: %s", e)
+
+        Logger.info_cyan("=== END CONNECTION UP ===")
 
     def _handle_PacketIn(self, event):
         Logger.info_red(f"_handle_PacketIn has been called {self.global_counter} times")

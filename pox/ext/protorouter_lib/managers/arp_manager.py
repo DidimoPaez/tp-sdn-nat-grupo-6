@@ -17,7 +17,6 @@ from ext.protorouter_lib.managers.nat_table_manager import NatTableManager
 from pox.lib.addresses import IPAddr
 from pox.lib.packet.arp import arp
 from protorouter_lib.openflow_sender import OpenFlowSender
-import pox.openflow.libopenflow_01 as of
 
 from ext.protorouter_lib.utils.logger import Logger
 from ext.protorouter_lib.constants import *
