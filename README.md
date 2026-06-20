@@ -11,7 +11,7 @@ Grupo 6:
 
 ## Controlador
 
-`python3 pox/pox.py [log.level--DEBUG] protorouter`
+`python3 pox/pox.py [log.level --DEBUG] protorouter`
 
 ## Topología
 
