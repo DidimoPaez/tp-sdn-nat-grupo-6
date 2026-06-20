@@ -1,7 +1,4 @@
 # Import some POX stuff
-
-import time
-
 from pox.core import core  # Main POX object
 from pox.lib.addresses import EthAddr, IPAddr  # Address types
 from pox.lib.packet.arp import arp
@@ -20,18 +17,7 @@ from protorouter_lib.models.pending_packet import PendingPacket
 from protorouter_lib.openflow_sender import OpenFlowSender
 from collections import namedtuple
 
-
-log = core.getLogger()
-RED = "\033[31m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-CYAN = "\033[36m"
-RESET = "\033[0m"
-
-
-def log_color(color, msg):
-    log.info(f"{color}{msg}{RESET}")
-
+from ext.protorouter_lib.utils.logger import Logger
 
 PRIVATE_SUBNET = IPAddr("192.168.1.0")  # Red interna
 PRIVATE_MASK = 24  # Máscara de la red interna
@@ -77,13 +63,13 @@ class ProtoRouter(object):
         self.openflow_sender = OpenFlowSender(connection=self.connection)
 
     def _handle_PacketIn(self, event):
-        log_color(RED, f"_handle_PacketIn has been called {self.global_counter} times")
+        Logger.info_red(f"_handle_PacketIn has been called {self.global_counter} times")
         self.global_counter += 1
 
         packet = event.parsed
 
         if not packet.parsed:
-            log.warning(
+            Logger.warn(
                 "[DROP] PacketIn con trama no reconocida. POX no pudo decodificar el paquete."
             )
             return
@@ -95,7 +81,7 @@ class ProtoRouter(object):
             self.handle_arp_type(event)
 
         else:
-            log_color(RED, "Packet ignored: protocol received: {packet.type}.")
+            Logger.info_red("Packet ignored: protocol received: {packet.type}.")
 
     def handle_arp_type(self, event):
         packet = event.parsed
@@ -108,7 +94,7 @@ class ProtoRouter(object):
             self.handle_packet_arp_reply(event)
 
     def handle_packet_arp_reply(self, event):
-        log_color(YELLOW, "Handling an ARP Reply")
+        Logger.info_yellow("Handling an ARP Reply")
         packet = event.parsed
         arp_packet = packet.payload
 
@@ -121,14 +107,14 @@ class ProtoRouter(object):
         pending_list = self.arp_manager.pop_pending(host_public_ip)
 
         if not pending_list:
-            log_color(YELLOW, f"No pending packets for {host_public_ip}")
+            Logger.info_yellow(f"No pending packets for {host_public_ip}")
             return
 
         for pending_packet in pending_list:
             nat_entry = pending_packet.nat_entry
 
             if nat_entry is None:
-                log_color(RED, "[ERROR] Pending packet without NAT entry")
+                Logger.info_red("[ERROR] Pending packet without NAT entry")
                 continue
 
             self.complete_and_forward(
@@ -136,7 +122,7 @@ class ProtoRouter(object):
             )
 
     def handle_packet_arp_request(self, event):
-        log_color(YELLOW, "Handling an ARP Request")
+        Logger.info_yellow("Handling an ARP Request")
         packet = event.parsed
         arp_packet = packet.payload
         in_port = event.port
@@ -156,8 +142,7 @@ class ProtoRouter(object):
             )
             return
 
-        log_color(
-            YELLOW,
+        Logger.info_yellow(
             f"ARP request ignored: {arp_packet.protosrc} asked for {addr_asked}, "
             f"This IP does not belong to Switch NAT",
         )
@@ -166,15 +151,9 @@ class ProtoRouter(object):
         entry, is_new = self.arp_manager.learn(ip_addr, mac_addr, in_port)
 
         if is_new:
-            log_color(
-                CYAN,
-                f"ARP learned: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} | type={entry.port_type}",
-            )
+            Logger.info_cyan(f"ARP learned: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} | type={entry.port_type}")
         else:
-            log_color(
-                CYAN,
-                f"ARP already exists: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} ",
-            )
+            Logger.info_cyan(f"ARP already exists: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} ")
 
     def handle_ip(self, event):
         packet = event.parsed
@@ -182,15 +161,13 @@ class ProtoRouter(object):
         in_port = event.port
         ip_dst = ip_pkt.dstip
 
-        log_color(
-            YELLOW,
+        Logger.info_cyan(
             f"RECIBIDO: {ip_pkt.srcip} → {ip_pkt.dstip} | "
             f"MAC: {packet.src} → {packet.dst} | In Port: {in_port}",
         )
 
         if ip_pkt.srcip.inNetwork(PRIVATE_SUBNET, PRIVATE_MASK):
-            log_color(
-                GREEN,
+            Logger.info_green(
                 f"MATCH: {ip_pkt.srcip} belongs to private network {PRIVATE_SUBNET}/{PRIVATE_MASK}",
             )
 
@@ -201,8 +178,7 @@ class ProtoRouter(object):
             self.forward_with_known_mac(event)
 
         else:
-            log_color(
-                RED,
+            Logger.info_red(
                 f"NO MATCH: {ip_pkt.srcip} no pertenece a {PRIVATE_SUBNET}/{PRIVATE_MASK}",
             )
 
@@ -211,7 +187,7 @@ class ProtoRouter(object):
         ip_packet = packet.payload
         target_ip = ip_packet.dstip
         if IPAddr(target_ip).inNetwork(self.nat_private_net, self.nat_private_mask):
-            log_color(RED, "[ERROR] MAC address Searchs just for private hosts")
+            Logger.info_red("[ERROR] MAC address Searchs just for private hosts")
             return
 
         flow_info = self.extract_flow_info(packet, event.port)
@@ -229,16 +205,13 @@ class ProtoRouter(object):
         )
 
         snapshot = self.nat_manager.debug_snapshot()
-        log_color(CYAN, f"Tabla NAT ({len(snapshot)} entrada/s): {snapshot}")
+        Logger.info_cyan(f"Tabla NAT ({len(snapshot)} entrada/s): {snapshot}")
 
         if not is_new:
-            log_color(
-                YELLOW,
-                f"Paquete repetido para un flujo ya en curso (estado={nat_entry.state}), se descarta",
-            )
+            Logger.info_yellow(f"Paquete repetido para un flujo ya en curso (estado={nat_entry.state}), se descarta",)
             return
 
-        log_color(YELLOW, f"New NAT Entry (PENDING):\n {nat_entry}\n")
+        Logger.info_yellow(f"New NAT Entry (PENDING):\n {nat_entry}\n")
 
         raw_packet: bytes = event.ofp.data
         pending_packet = PendingPacket(event.port, raw_packet, nat_entry)
@@ -270,8 +243,7 @@ class ProtoRouter(object):
         )
 
         if not is_new:
-            log_color(
-                YELLOW,
+            Logger.info_yellow(
                 f"Paquete con MAC ya conocida pero flujo ya en curso (estado={nat_entry.state}), se descarta",
             )
             return
@@ -375,10 +347,7 @@ class ProtoRouter(object):
     def install_flows(self, nat_entry):
         ip_proto = PROTO_IP_NUMBER.get(nat_entry.protocol)
         if ip_proto is None:
-            log_color(
-                RED,
-                f"[ERROR] Protocolo desconocido para instalar flujo: {nat_entry.protocol}",
-            )
+            Logger.info_red(f"[ERROR] Protocolo desconocido para instalar flujo: {nat_entry.protocol}",)
             return
 
         # Instalar Flujo Saliente
@@ -425,8 +394,8 @@ class ProtoRouter(object):
         fm_back.actions.append(of.ofp_action_output(port=nat_entry.private_openflow_port))
         self.connection.send(fm_back)
 
-        log_color(
-            GREEN, f"Flujos instalados para puerto público {nat_entry.nat_public_port}"
+        Logger.info_green(
+            f"Flujos instalados para puerto público {nat_entry.nat_public_port}"
         )
 
     """
@@ -440,7 +409,7 @@ class ProtoRouter(object):
         self.nat_manager.mark_installed(nat_entry, host_public_mac, public_openflow_port)
         self.install_flows(nat_entry)
 
-        log_color(GREEN, f"NAT entry completed:\n{nat_entry}")
+        Logger.info_green(f"NAT entry completed:\n{nat_entry}")
 
         self.openflow_sender.forward_of_data(
             raw_packet,
@@ -461,8 +430,8 @@ class ProtoRouter(object):
         if match.nw_dst == self.nat_public_ip:
             nat_public_port = match.tp_dst
             self.nat_manager.handle_flow_removed_incoming(nat_public_port)
-            log_color(
-                YELLOW, f"Flujo entrante removido por el switch (puerto público {nat_public_port})"
+            Logger.info_yellow(
+                f"Flujo entrante removido por el switch (puerto público {nat_public_port})"
             )
         else:
             protocol = IP_NUMBER_TO_PROTO.get(match.nw_proto)
@@ -471,15 +440,12 @@ class ProtoRouter(object):
             self.nat_manager.handle_flow_removed_outgoing(
                 protocol, match.nw_src, match.tp_src, match.nw_dst, match.tp_dst
             )
-            log_color(
-                YELLOW,
-                f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})",
-            )
+            Logger.info_yellow(f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})")
 
 def launch():
     
     def start_switch(event):
-        log_color(YELLOW, f"Iniciando ProtoRouter para Switch {event.connection.dpid}")
+        Logger.info_yellow(f"Iniciando ProtoRouter para Switch {event.connection.dpid}")
         ProtoRouter(event.connection)
 
     core.openflow.addListenerByName("ConnectionUp", start_switch)

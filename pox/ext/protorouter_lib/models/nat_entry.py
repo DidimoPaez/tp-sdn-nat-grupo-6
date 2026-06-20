@@ -2,7 +2,6 @@ import time
 
 from protorouter_lib.constants import STATE_INSTALLED, STATE_PENDING_ARP, TIME_OUT
 
-
 class NatEntry:
     def __init__(
         self,

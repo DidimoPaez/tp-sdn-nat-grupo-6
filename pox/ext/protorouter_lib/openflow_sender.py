@@ -1,8 +1,8 @@
 import pox.openflow.libopenflow_01 as of
-from pox.core import core  # Main POX object
 from pox.lib.addresses import EthAddr, IPAddr  # Address types
 from pox.lib.packet.arp import arp
 from pox.lib.packet.ethernet import ethernet
+from ext.protorouter_lib.utils.logger import Logger
 
 from protorouter_lib.constants import (
     ETHER_BROADCAST,
@@ -10,18 +10,6 @@ from protorouter_lib.constants import (
     MAC_ETHER_LENGTH,
     MAC_UNKNOWN,
 )
-
-log = core.getLogger()
-RED = "\033[31m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-CYAN = "\033[36m"
-RESET = "\033[0m"
-
-
-def log_color(color, msg):
-    log.info(f"{color}{msg}{RESET}")
-
 
 class OpenFlowSender:
     def __init__(self, connection):
@@ -49,8 +37,7 @@ class OpenFlowSender:
         msg = of.ofp_packet_out()
         msg.data = ether.pack()
         msg.actions.append(of.ofp_action_output(port=outport))
-        log_color(
-            RED,
+        Logger.info_red(
             f"Responding MAC: {reply.hwsrc} | From IP: {reply.protosrc} | To MAC: {reply.hwdst} | To IP: {reply.protodst}",
         )
         self.connection.send(msg)
@@ -79,10 +66,7 @@ class OpenFlowSender:
         msg = of.ofp_packet_out()
         msg.data = ether.pack()
         msg.actions.append(of.ofp_action_output(port=outport))
-        log_color(
-            RED,
-            f"Requesting MAC | From IP: {request.protosrc} | From MAC: {request.hwsrc} | To IP: {request.protodst}",
-        )
+        Logger.info_red(f"Requesting MAC | From IP: {request.protosrc} | From MAC: {request.hwsrc} | To IP: {request.protodst}")
         self.connection.send(msg)
 
     def forward_of_data(
@@ -109,8 +93,7 @@ class OpenFlowSender:
 
         msg.actions.append(of.ofp_action_output(port=public_openflow_port))
 
-        log_color(
-            GREEN,
+        Logger.info_green(
             f"Forwarding pending packet with NAT: "
             f"{host_private_ip}:{host_private_port} "
             f"-> {host_public_ip}:{host_public_port} "
