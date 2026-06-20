@@ -1,4 +1,8 @@
+from collections import namedtuple
+
 from pox.lib.addresses import EthAddr, IPAddr
+
+
 
 PRIVATE: str = "private"
 PUBLIC: str = "public"
@@ -52,4 +56,18 @@ PUBLIC_PORT = 1
 # MAC del host externo (TODO: resolver mediante ARP)
 H1_MAC = EthAddr(
     "00:00:00:00:00:01"
+)
+
+# Datos de un flujo saliente, parseados una sola vez del paquete IP.
+FlowInfo = namedtuple(
+    "FlowInfo",
+    [
+        "protocol",
+        "host_private_ip",
+        "host_private_port",
+        "host_private_mac",
+        "private_openflow_port",
+        "host_public_ip",
+        "host_public_port",
+    ],
 )
