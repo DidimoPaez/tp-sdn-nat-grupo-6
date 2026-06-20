@@ -1,6 +1,5 @@
 import time
 
-
 class PendingPacket:
     def __init__(self, in_port: int, raw_packet: bytes, nat_entry):
         self.in_port = in_port
