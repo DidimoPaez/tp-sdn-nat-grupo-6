@@ -108,7 +108,7 @@ class ArpManager:
 
         Logger.info_green(f"NAT entry completed:\n{nat_entry}")
 
-        self.openflow_sender.forward_of_data(
+        self.of_sender.forward_of_data(
             raw_packet,
             self.cfg.nat_public_mac,
             self.cfg.nat_public_ip,

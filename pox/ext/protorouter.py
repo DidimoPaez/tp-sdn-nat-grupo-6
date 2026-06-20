@@ -30,13 +30,13 @@ FlowInfo = namedtuple(
 class ProtoRouter(object):
     def __init__(self, connection):
         self.cfg = ControllerConfig.get()
+        self.connection = connection
         self.openflow_sender = OpenFlowSender(connection=self.connection)
         self.nat_manager = NatManager(INITIAL_ASSIGNED_PORT)
         self.arp_manager = ArpManager(self.nat_manager, self.cfg.nat_private_net, self.cfg.nat_private_mask, connection, self.openflow_sender)
 
         self.openflow_ports: set = set()
         self.global_counter: int = 1 
-        self.connection = connection
         connection.addListeners(self)
 
     def _handle_PacketIn(self, event):
