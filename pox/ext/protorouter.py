@@ -33,12 +33,12 @@ class ProtoRouter(object):
         connection = event.connection
 
         Logger.info_cyan("=== CONNECTION UP ===")
-        Logger.info_cyan("Switch DPID: %s", dpidToStr(dpid))
-        Logger.info_cyan("Remote: %s", connection)
+        Logger.info_cyan(f"Switch DPID: {dpidToStr(dpid)}")
+        Logger.info_cyan(f"Remote: {connection}")
 
         # 1. Verificar versión OpenFlow
         try:
-            Logger.info_cyan("OF version: %s", connection.ofnexus.ofp_version)
+            Logger.info_cyan(f"OF version: {connection.ofnexus.ofp_version}")
         except:
             Logger.warn("No se pudo obtener versión OpenFlow")
 
@@ -48,7 +48,7 @@ class ProtoRouter(object):
             connection.send(msg)
             Logger.info_cyan("Barrier request enviado OK")
         except Exception as e:
-            Logger.error("Error enviando barrier: %s", e)
+            Logger.error(f"Error enviando barrier: {e}")
 
         # 3. Instalar flow por defecto (MUY importante para debug)
         # Esto evita que paquetes "raros" rompan todo o saturen PacketIn
@@ -60,7 +60,7 @@ class ProtoRouter(object):
             connection.send(fm)
             Logger.info_cyan("Flow default instalado (table-miss -> controller)")
         except Exception as e:
-            Logger.error("Error instalando flow default: %s", e)
+            Logger.error(f"Error instalando flow default: {e}")
 
         Logger.info_cyan("=== END CONNECTION UP ===")
 
