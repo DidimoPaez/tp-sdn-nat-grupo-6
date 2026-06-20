@@ -29,7 +29,7 @@ class ArpManager:
 
 
     # Tabla ARP
-
+    
     def knows(self, ip_addr) -> bool:
         return IPAddr(ip_addr) in self._table
 
@@ -52,12 +52,12 @@ class ArpManager:
         return entry, True
 
     # Copia de la tabla actual, para debug
+    
     def all_entries(self) -> dict:
         return dict(self._table)
 
-
     # Paquetes pendientes de resolución ARP
- 
+    
     def queue_pending(self, ip_addr, pending_packet) -> bool:
         ip_addr = IPAddr(ip_addr)
         is_first_for_this_ip = ip_addr not in self._pending

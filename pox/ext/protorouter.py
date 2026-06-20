@@ -1,15 +1,8 @@
-# Import some POX stuff
-from pox.core import core  # Main POX object
-from pox.lib.addresses import EthAddr, IPAddr  # Address types
+from pox.core import core
+from pox.lib.addresses import IPAddr
 from pox.lib.packet.arp import arp
 from pox.lib.packet.ethernet import ethernet
-from protorouter_lib.constants import (
-    INITIAL_ASSIGNED_PORT,
-    PROTO_TCP,
-    PROTO_UDP,
-    PROTO_IP_NUMBER,
-    IP_NUMBER_TO_PROTO,
-)
+from protorouter_lib.constants import *
 import pox.openflow.libopenflow_01 as of
 from protorouter_lib.managers.arp_manager import ArpManager
 from protorouter_lib.managers.nat_manager import NatManager
@@ -18,18 +11,7 @@ from protorouter_lib.openflow_sender import OpenFlowSender
 from collections import namedtuple
 
 from ext.protorouter_lib.utils.logger import Logger
-
-PRIVATE_SUBNET = IPAddr("192.168.1.0")  # Red interna
-PRIVATE_MASK = 24  # Máscara de la red interna
-PRIVATE_IP = IPAddr("192.168.1.254")  # IP del router en la red privada
-PUBLIC_IP = IPAddr("200.0.0.254")  # IP del router en la red pública
-PUBLIC_MAC = EthAddr("00:00:00:aa:aa:aa")  # MAC del router hacia la red pública
-PRIVATE_MAC = EthAddr("00:00:00:bb:bb:bb")  # MAC del router hacia la red privada
-PUBLIC_PORT = 1  # Puerto del switch conectado a la red pública
-
-H1_MAC = EthAddr(
-    "00:00:00:00:00:01"
-)  # MAC del host externo (TODO: resolver mediante ARP)
+from ext.protorouter_lib.managers.controller_config import ControllerConfig
 
 # Datos de un flujo saliente, parseados una sola vez del paquete IP.
 FlowInfo = namedtuple(
@@ -47,13 +29,8 @@ FlowInfo = namedtuple(
 
 class ProtoRouter(object):
     def __init__(self, connection):
-        self.nat_private_net = PRIVATE_SUBNET
-        self.nat_private_mask = PRIVATE_MASK
-        self.nat_private_ip = PRIVATE_IP
-        self.nat_public_ip = PUBLIC_IP
-        self.nat_private_mac = PRIVATE_MAC
-        self.nat_public_mac = PUBLIC_MAC
-        self.arp_manager = ArpManager(self.nat_private_net, self.nat_private_mask)
+        self.cfg = ControllerConfig.get()
+        self.arp_manager = ArpManager(self.cfg.nat_private_net, self.cfg.nat_private_mask)
         self.nat_manager = NatManager(INITIAL_ASSIGNED_PORT)
 
         self.openflow_ports: set = set()
@@ -69,21 +46,17 @@ class ProtoRouter(object):
         packet = event.parsed
 
         if not packet.parsed:
-            Logger.warn(
-                "[DROP] PacketIn con trama no reconocida. POX no pudo decodificar el paquete."
-            )
+            Logger.warn("[DROP] PacketIn con trama no reconocida. POX no pudo decodificar el paquete.")
             return
 
         if packet.type == ethernet.IP_TYPE:
             self.handle_ip(event)
-
         elif packet.type == ethernet.ARP_TYPE:
-            self.handle_arp_type(event)
-
+            self.handle_arp(event)
         else:
             Logger.info_red("Packet ignored: protocol received: {packet.type}.")
 
-    def handle_arp_type(self, event):
+    def handle_arp(self, event):
         packet = event.parsed
         arp_packet = packet.payload
 
@@ -130,15 +103,15 @@ class ProtoRouter(object):
 
         self.learn_arp_entry(in_port, packet.payload.protosrc, packet.payload.hwsrc)
 
-        if addr_asked == self.nat_private_ip:
+        if addr_asked == self.cfg.nat_private_ip:
             self.openflow_sender.make_an_arp_reply(
-                arp_packet, self.nat_private_mac, addr_asked, in_port
+                arp_packet, self.cfg.nat_private_mac, addr_asked, in_port
             )
             return
 
-        elif addr_asked == self.nat_public_ip:
+        elif addr_asked == self.cfg.nat_public_ip:
             self.openflow_sender.make_an_arp_reply(
-                arp_packet, self.nat_public_mac, addr_asked, in_port
+                arp_packet, self.cfg.nat_public_mac, addr_asked, in_port
             )
             return
 
@@ -186,7 +159,7 @@ class ProtoRouter(object):
         packet = event.parsed
         ip_packet = packet.payload
         target_ip = ip_packet.dstip
-        if IPAddr(target_ip).inNetwork(self.nat_private_net, self.nat_private_mask):
+        if IPAddr(target_ip).inNetwork(self.cfg.nat_private_net, self.cfg.nat_private_mask):
             Logger.info_red("[ERROR] MAC address Searchs just for private hosts")
             return
 
@@ -260,7 +233,7 @@ class ProtoRouter(object):
 
         if is_first_for_this_ip:
             self.openflow_sender.make_an_arp_request(
-                target_ip, PUBLIC_PORT, self.nat_public_mac, self.nat_public_ip
+                target_ip, PUBLIC_PORT, self.cfg.nat_public_mac, self.cfg.nat_public_ip
             )
 
     def extract_flow_info(self, eth_packet, in_port):
@@ -279,7 +252,7 @@ class ProtoRouter(object):
 
         host_private_ip = ip_packet.srcip
         if not IPAddr(host_private_ip).inNetwork(
-            self.nat_private_net, self.nat_private_mask
+            self.cfg.nat_private_net, self.cfg.nat_private_mask
         ):
             return None
 
@@ -365,9 +338,9 @@ class ProtoRouter(object):
         fm.match.tp_dst = nat_entry.host_public_port
 
         # Acción (Saliente)
-        fm.actions.append(of.ofp_action_dl_addr.set_src(self.nat_public_mac))
+        fm.actions.append(of.ofp_action_dl_addr.set_src(self.cfg.nat_public_mac))
         fm.actions.append(of.ofp_action_dl_addr.set_dst(nat_entry.host_public_mac))
-        fm.actions.append(of.ofp_action_nw_addr.set_src(self.nat_public_ip))
+        fm.actions.append(of.ofp_action_nw_addr.set_src(self.cfg.nat_public_ip))
         fm.actions.append(of.ofp_action_tp_port.set_src(nat_entry.nat_public_port))
         fm.actions.append(of.ofp_action_output(port=nat_entry.public_openflow_port))
         self.connection.send(fm)
@@ -382,12 +355,12 @@ class ProtoRouter(object):
         fm_back.match.in_port = nat_entry.public_openflow_port
         fm_back.match.nw_proto = ip_proto
         fm_back.match.nw_src = nat_entry.host_public_ip
-        fm_back.match.nw_dst = self.nat_public_ip
+        fm_back.match.nw_dst = self.cfg.nat_public_ip
         fm_back.match.tp_src = nat_entry.host_public_port
         fm_back.match.tp_dst = nat_entry.nat_public_port
 
         # Acción (Entrante)
-        fm_back.actions.append(of.ofp_action_dl_addr.set_src(self.nat_private_mac))
+        fm_back.actions.append(of.ofp_action_dl_addr.set_src(self.cfg.nat_private_mac))
         fm_back.actions.append(of.ofp_action_dl_addr.set_dst(nat_entry.host_private_mac))
         fm_back.actions.append(of.ofp_action_nw_addr.set_dst(nat_entry.host_private_ip))
         fm_back.actions.append(of.ofp_action_tp_port.set_dst(nat_entry.host_private_port))
@@ -413,8 +386,8 @@ class ProtoRouter(object):
 
         self.openflow_sender.forward_of_data(
             raw_packet,
-            self.nat_public_mac,
-            self.nat_public_ip,
+            self.cfg.nat_public_mac,
+            self.cfg.nat_public_ip,
             nat_entry.nat_public_port,
             nat_entry.public_openflow_port,
             nat_entry.host_public_mac,
@@ -427,7 +400,7 @@ class ProtoRouter(object):
     def _handle_FlowRemoved(self, event):
         match = event.ofp.match
 
-        if match.nw_dst == self.nat_public_ip:
+        if match.nw_dst == self.cfg.nat_public_ip:
             nat_public_port = match.tp_dst
             self.nat_manager.handle_flow_removed_incoming(nat_public_port)
             Logger.info_yellow(
@@ -443,7 +416,6 @@ class ProtoRouter(object):
             Logger.info_yellow(f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})")
 
 def launch():
-    
     def start_switch(event):
         Logger.info_yellow(f"Iniciando ProtoRouter para Switch {event.connection.dpid}")
         ProtoRouter(event.connection)
