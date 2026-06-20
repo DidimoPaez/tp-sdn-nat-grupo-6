@@ -1,9 +1,8 @@
 from ext.protorouter_lib.utils.colors import *
-
-from pox.core import core
+import logging
 
 class Logger:
-    logger = core.getLogger()
+    logger = logging.getLogger()
 
     @staticmethod
     def info_red(text: str) -> None:
