@@ -8,7 +8,7 @@ La ideas es que aca tambien esten los metodos de pregutna y respuesta tambien.
 .
 """
 
-from pox.ext.protorouter_lib.managers.flow_manager import FlowManager
+from ext.protorouter_lib.managers.flow_manager import FlowManager
 from protorouter_lib.openflow_sender import OpenFlowSender
 
 from protorouter_lib.models.pending_packet import PendingPacket

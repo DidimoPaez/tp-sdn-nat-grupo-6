@@ -1,7 +1,7 @@
 import pox.openflow.libopenflow_01 as of
 
-from pox.ext.protorouter_lib.constants import *
-from pox.ext.protorouter_lib.utils.logger import Logger
+from ext.protorouter_lib.constants import *
+from ext.protorouter_lib.utils.logger import Logger
 
 
 class FlowManager:

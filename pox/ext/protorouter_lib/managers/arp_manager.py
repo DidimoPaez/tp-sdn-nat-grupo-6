@@ -13,7 +13,7 @@ pop_pending) y el manager responde con la información o con un resultado
 simple (True/False, una entrada, una lista). 
 """
 
-from pox.ext.protorouter_lib.managers.nat_table_manager import NatTableManager
+from ext.protorouter_lib.managers.nat_table_manager import NatTableManager
 from pox.lib.addresses import IPAddr
 from pox.lib.packet.arp import arp
 from protorouter_lib.openflow_sender import OpenFlowSender

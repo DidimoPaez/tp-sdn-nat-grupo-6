@@ -2,7 +2,7 @@ from typing import Dict, List
 
 from ext.protorouter_lib.managers.arp_table_manager import ArpTableManager
 from ext.protorouter_lib.models.nat_entry import NatEntry
-from pox.ext.protorouter_lib.constants import *
+from ext.protorouter_lib.constants import *
 
 
 class NatTableManager:
