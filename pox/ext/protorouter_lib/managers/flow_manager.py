@@ -1,11 +1,13 @@
 import pox.openflow.libopenflow_01 as of
 
 from ext.protorouter_lib.constants import *
+from ext.protorouter_lib.managers.controller_config import ControllerConfig
 from ext.protorouter_lib.utils.logger import Logger
 
 
 class FlowManager:
     def __init__(self, connection):
+        self.cfg = ControllerConfig.get()
         self.connection = connection
 
     def install_flows(self, nat_entry):
