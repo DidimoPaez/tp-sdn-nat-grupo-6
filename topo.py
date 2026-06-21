@@ -58,7 +58,11 @@ class NATTopo(Topo):
 
 def run():
     topo = NATTopo()
-    net = Mininet(topo=topo, controller=RemoteController, link=TCLink)
+    net = Mininet(
+        topo=topo, 
+        controller=lambda name: RemoteController(name, ip='127.0.0.1', port=6633), 
+        link=TCLink
+    )
     net.start()
 
     # Deshabilita IPv6 en hosts

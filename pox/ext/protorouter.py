@@ -79,7 +79,7 @@ class ProtoRouter(object):
         elif packet.type == ethernet.ARP_TYPE:
             self.arp_manager.handle_arp(event)
         else:
-            Logger.info_red("Packet ignored: protocol received: {packet.type}.")
+            Logger.info_red(f"Packet ignored: protocol received: {packet.type}.")
     
     def _handle_FlowRemoved(self, event):
         Logger.info_red(f"_handle_FlowRemoved has been called")
