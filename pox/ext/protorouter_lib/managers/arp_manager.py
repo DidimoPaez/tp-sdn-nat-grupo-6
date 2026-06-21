@@ -15,8 +15,20 @@ simple (True/False, una entrada, una lista).
 
 from pox.lib.addresses import EthAddr, IPAddr
 
+from pox.core import core
 from protorouter_lib.constants import PRIVATE, PUBLIC
 from protorouter_lib.models.arp_entry import ArpEntry
+
+log = core.getLogger()
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+RESET = "\033[0m"
+
+
+def log_color(color, msg):
+    log.info(f"{color}{msg}{RESET}")
 
 
 class ArpManager:
@@ -44,6 +56,7 @@ class ArpManager:
             existing.switch_openflow_port = in_port
             existing.port_type = port_type
             existing.touch()
+            self.print_table()
             return existing, False
 
         port_type = (
@@ -53,6 +66,15 @@ class ArpManager:
         )
         entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
         self._table[ip_addr] = entry
+
+        print("ARP LEARN - nueva entrada:")
+        print("  IP:", ip_addr)
+        print("  MAC:", mac_addr)
+        print("  Puerto:", in_port)
+        print("  Tipo:", port_type)
+
+
+        self.print_table()
         return entry, True
 
     # Copia de la tabla actual, para debug
@@ -76,7 +98,11 @@ class ArpManager:
             if entry.is_stale()
         ]
 
-        for ip, _entry in expired_entries:
+        for ip, entry in expired_entries:
+            log_color(
+                CYAN, 
+                f"ARP entry expired and removed: {ip} -> {entry.mac} | port={entry.switch_openflow_port} | type={entry.port_type}",
+            )
             self._table.pop(ip, None)
 
         return expired_entries
@@ -127,3 +153,19 @@ class ArpManager:
             }
             for ip, entry in self._table.items()
         ]
+
+    def print_table(self):
+        print("===== TABLA ARP ACTUAL =====")
+
+        if not self._table:
+            print("  <vacía>")
+
+        for ip, entry in self._table.items():
+            print(
+                "  IP:", ip,
+                "| MAC:", entry.mac_addr,
+                "| Puerto:", entry.in_port,
+                "| Tipo:", entry.port_type
+            )
+
+        print("============================")
