@@ -82,6 +82,7 @@ class ProtoRouter(object):
             Logger.info_red("Packet ignored: protocol received: {packet.type}.")
     
     def _handle_FlowRemoved(self, event):
+        Logger.info_red(f"_handle_FlowRemoved has been called")
         match = event.ofp.match
 
         if match.nw_dst == self.cfg.nat_public_ip:
