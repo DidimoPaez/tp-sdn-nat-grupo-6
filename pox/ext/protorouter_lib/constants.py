@@ -7,7 +7,7 @@ IP_ADDR_LENGTH: int = 4  ##dirección IPv4 mide 32 bits
 MAC_UNKNOWN: str = "00:00:00:00:00:00"
 ETHER_BROADCAST: str = "ff:ff:ff:ff:ff:ff"
 
-TIME_OUT: int = 60
+TIME_OUT: int = 10
 STATE_PENDING_ARP = "Pending ARP"
 STATE_INSTALLED = "Installed"
 

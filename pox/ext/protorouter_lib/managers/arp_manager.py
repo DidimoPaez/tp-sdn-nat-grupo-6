@@ -36,35 +36,6 @@ class ArpManager:
     def lookup(self, ip_addr):
         return self._table.get(IPAddr(ip_addr))
 
-    def learn(self, ip_addr, mac_addr, in_port):
-        ip_addr = IPAddr(ip_addr)
-        existing = self._table.get(ip_addr)
-        if existing is not None:
-            existing.mac = EthAddr(mac_addr)
-            existing.switch_openflow_port = in_port
-            existing.port_type = port_type
-            existing.touch()
-            self.print_table()
-            return existing, False
-
-        port_type = (
-            PRIVATE
-            if ip_addr.inNetwork(self._private_network, self._private_mask)
-            else PUBLIC
-        )
-        entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
-        self._table[ip_addr] = entry
-
-        print("ARP LEARN - nueva entrada:")
-        print("  IP:", ip_addr)
-        print("  MAC:", mac_addr)
-        print("  Puerto:", in_port)
-        print("  Tipo:", port_type)
-
-
-        self.print_table()
-        return entry, True
-
     # Copia de la tabla actual, para debug
     def all_entries(self) -> dict:
         return dict(self._table)
@@ -97,10 +68,20 @@ class ArpManager:
         # Si sigue existiendo la entrada, actualizo el tiempo 
         if existing is not None:
             existing.update(EthAddr(mac_addr), in_port, port_type)
+            self.print_table()
             return existing, False
 
         entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
         self._table[ip_addr] = entry
+
+        print("ARP LEARN - nueva entrada:")
+        print("  IP:", ip_addr)
+        print("  MAC:", mac_addr)
+        print("  Puerto:", in_port)
+        print("  Tipo:", port_type)
+
+
+        self.print_table()
         return entry, True
 
 

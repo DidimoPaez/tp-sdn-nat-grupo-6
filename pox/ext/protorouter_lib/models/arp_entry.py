@@ -7,7 +7,7 @@ class ArpEntry:
         self.switch_openflow_port = switch_openflow_port
         self.port_type = port_type
         self.last_seen = time.monotonic()
-        self.idle_timeout: int = TIME_OUT 
+        self.idle_timeout: int = TIME_OUT * 2
 
     # Funciones parecidas a las de NatEntry
     def touch(self):
