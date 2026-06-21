@@ -15,21 +15,9 @@ simple (True/False, una entrada, una lista).
 
 from pox.lib.addresses import EthAddr, IPAddr
 
-from pox.core import core
+
 from protorouter_lib.constants import PRIVATE, PUBLIC
 from protorouter_lib.models.arp_entry import ArpEntry
-
-log = core.getLogger()
-RED = "\033[31m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-CYAN = "\033[36m"
-RESET = "\033[0m"
-
-
-def log_color(color, msg):
-    log.info(f"{color}{msg}{RESET}")
-
 
 class ArpManager:
     def __init__(self, private_network: IPAddr, private_mask: int):
@@ -82,15 +70,6 @@ class ArpManager:
         return dict(self._table)
     
     def evict_stale_entries(self):
-        # expired_ips = [
-        #     ip for ip, entry in self._table.items()
-        #     if entry.is_stale()
-        # ]
-
-        # for ip in expired_ips:
-        #     self._table.pop(ip, None)
-
-        # return expired_ips
 
         expired_entries = [
             (ip, entry)
@@ -98,11 +77,7 @@ class ArpManager:
             if entry.is_stale()
         ]
 
-        for ip, entry in expired_entries:
-            log_color(
-                CYAN, 
-                f"ARP entry expired and removed: {ip} -> {entry.mac} | port={entry.switch_openflow_port} | type={entry.port_type}",
-            )
+        for ip, _entry in expired_entries:
             self._table.pop(ip, None)
 
         return expired_entries
@@ -130,7 +105,6 @@ class ArpManager:
 
 
     # Paquetes pendientes de resolución ARP
- 
     def queue_pending(self, ip_addr, pending_packet) -> bool:
         ip_addr = IPAddr(ip_addr)
         is_first_for_this_ip = ip_addr not in self._pending

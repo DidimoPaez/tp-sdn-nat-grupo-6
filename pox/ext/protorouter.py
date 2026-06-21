@@ -85,7 +85,7 @@ class ProtoRouter(object):
         if expired_arp_entries:
             for ip, entry in expired_arp_entries:
                 log_color(
-                    YELLOW,
+                    CYAN,
                     f"ARP entry expired and removed: "
                     f"{ip} -> {entry.mac} | "
                     f"port={entry.switch_openflow_port} | "
