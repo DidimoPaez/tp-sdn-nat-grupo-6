@@ -36,6 +36,7 @@ class ArpManager:
     def lookup(self, ip_addr):
         return self._table.get(IPAddr(ip_addr))
 
+
     # Copia de la tabla actual, para debug
     def all_entries(self) -> dict:
         return dict(self._table)
@@ -68,7 +69,6 @@ class ArpManager:
         # Si sigue existiendo la entrada, actualizo el tiempo 
         if existing is not None:
             existing.update(EthAddr(mac_addr), in_port, port_type)
-            self.print_table()
             return existing, False
 
         entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
@@ -80,8 +80,6 @@ class ArpManager:
         print("  Puerto:", in_port)
         print("  Tipo:", port_type)
 
-
-        self.print_table()
         return entry, True
 
 
@@ -109,18 +107,3 @@ class ArpManager:
             for ip, entry in self._table.items()
         ]
 
-    def print_table(self):
-        print("===== TABLA ARP ACTUAL =====")
-
-        if not self._table:
-            print("  <vacía>")
-
-        for ip, entry in self._table.items():
-            print(
-                "  IP:", ip,
-                "| MAC:", entry.mac_addr,
-                "| Puerto:", entry.in_port,
-                "| Tipo:", entry.port_type
-            )
-
-        print("============================")
