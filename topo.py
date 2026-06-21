@@ -52,9 +52,17 @@ class NATTopo(Topo):
             defaultRoute="via 192.168.1.254",
         )
 
+        h4 = self.addHost(
+            "h4",
+            ip="192.168.1.4/24",
+            mac="00:00:00:00:00:04",
+            defaultRoute="via 192.168.1.254",
+        )
+
         self.addLink(h1, s1)
         self.addLink(h2, s1)
         self.addLink(h3, s1)
+        self.addLink(h4, s1)
 
 def run():
     topo = NATTopo()
