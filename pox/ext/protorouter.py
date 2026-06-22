@@ -205,6 +205,14 @@ class ProtoRouter(object):
         in_port = event.port
         ip_dst = ip_pkt.dstip
 
+        if ip_pkt.protocol not in (ip_pkt.TCP_PROTOCOL, ip_pkt.UDP_PROTOCOL):
+            log_color(
+                YELLOW,
+                f"[DROP] Protocolo IP no soportado: {ip_pkt.protocol} "
+                f"({ip_pkt.srcip} → {ip_pkt.dstip})",
+            )
+            return
+
         log_color(
             YELLOW,
             f"RECIBIDO: {ip_pkt.srcip} → {ip_pkt.dstip} | "
