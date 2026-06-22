@@ -1,5 +1,6 @@
 import time
 
+from ext.protorouter_lib.models.flow import Flow
 from protorouter_lib.constants import STATE_INSTALLED, STATE_PENDING_ARP, TIME_OUT
 
 class NatEntry:
@@ -37,9 +38,38 @@ class NatEntry:
         self.outgoing_flow_removed = False
         self.incoming_flow_removed = False
 
+        self.flow = None
+        self.build_flow()
+
+    def build_flow(self):
+        self.flow = Flow(
+            self.protocol,
+            self.host_private_mac,
+            self.host_private_ip,
+            self.host_private_port,
+            self.private_openflow_port,
+            self.host_public_ip,
+            self.host_public_port
+        )
+
+    @staticmethod
+    def from_flow(flow: Flow, nat_public_port):
+        return NatEntry(
+            flow.protocol,
+            flow.source_ip,
+            flow.source_port,
+            flow.source_mac,
+            flow.in_port,
+            nat_public_port,
+            flow.destination_ip,
+            flow.desination_port,
+            None,
+            None
+        )
+
     def touch(self):
         self.last_seen = time.monotonic()
-    
+
     def mark_flow_removed(self, direction: str) -> bool:
         if direction == "outgoing":
             self.outgoing_flow_removed = True

@@ -1,7 +1,10 @@
 from pox.core import core
-from pox.lib.packet.ethernet import ethernet
+from ext.protorouter_lib.managers.arp_reply_manager import ArpReplyManager
+from ext.protorouter_lib.managers.arp_request_reply_manager import ArpRequestReplyManager
+from ext.protorouter_lib.managers.event_manager import EventManager
+from ext.protorouter_lib.managers.packet_forward_manager import PacketForwardManager
+from ext.protorouter_lib.managers.packet_manager import PacketManager
 import pox.openflow.libopenflow_01 as of
-from pox.openflow import FlowRemoved, PacketIn
 from pox.lib.util import dpidToStr
 
 from protorouter_lib.constants import *
@@ -18,12 +21,21 @@ class ProtoRouter(object):
     def __init__(self, connection):
         self.cfg = ControllerConfig.get()
         self.connection = connection
-        self.openflow_sender = OpenFlowSender(connection=self.connection)
+        self.openflow_sender = OpenFlowSender(self.connection)
+
         self.arp_table_manager = ArpTableManager(self.cfg.nat_private_net, self.cfg.nat_private_mask)
         self.nat_table_manager = NatTableManager(INITIAL_ASSIGNED_PORT, self.arp_table_manager)
-        self.flow_manager = FlowManager(self.connection)
+        
         self.nat_manager = NatManager(self.arp_table_manager, self.nat_table_manager, self.flow_manager, INITIAL_ASSIGNED_PORT, self.openflow_sender)
-        self.arp_manager = ArpManager(self.arp_table_manager, self.nat_table_manager, self.flow_manager, self.openflow_sender)
+
+        self.flow_manager = FlowManager(self.connection, self.nat_manager)
+        self.packet_manager = PacketManager(self.arp_manager, self.nat_manager)
+        self.packet_forward_manager = PacketForwardManager(self.openflow_sender)
+        self.arp_request_manager = ArpRequestReplyManager(self.arp_table_manager, self.openflow_sender)
+        self.arp_reply_manager = ArpReplyManager(self.arp_table_manager, self.nat_table_manager, self.packet_forward_manager, self.flow_manager)
+        self.arp_manager = ArpManager(self.arp_request_manager, self.arp_reply_manager)
+
+        self.event_manager = EventManager(self.flow_manager, self.packet_manager)
 
         self.openflow_ports: set = set()
         self.global_counter: int = 1 
@@ -37,13 +49,6 @@ class ProtoRouter(object):
         Logger.info_cyan(f"Switch DPID: {dpidToStr(dpid)}")
         Logger.info_cyan(f"Remote: {connection}")
 
-        # 1. Verificar versión OpenFlow
-        try:
-            Logger.info_cyan(f"OF version: {connection.ofnexus.ofp_version}")
-        except:
-            Logger.warn("No se pudo obtener versión OpenFlow")
-
-        # 2. Verificar que el switch responde a barrier (sanity check)
         try:
             msg = of.ofp_barrier_request()
             connection.send(msg)
@@ -51,8 +56,6 @@ class ProtoRouter(object):
         except Exception as e:
             Logger.error(f"Error enviando barrier: {e}")
 
-        # 3. Instalar flow por defecto (MUY importante para debug)
-        # Esto evita que paquetes "raros" rompan todo o saturen PacketIn
         try:
             fm = of.ofp_flow_mod()
             fm.priority = 0
@@ -65,41 +68,15 @@ class ProtoRouter(object):
 
         Logger.info_cyan("=== END CONNECTION UP ===")
 
-    def _handle_PacketIn(self, event: PacketIn):
-        Logger.info_red(f"_handle_PacketIn has been called {self.global_counter} times")
-        self.global_counter += 1
-
-        packet: ethernet = event.parsed
-
-        if not packet.parsed:
-            Logger.warn("[DROP] PacketIn con trama no reconocida. POX no pudo decodificar el paquete.")
-            return
-
-        if packet.type == ethernet.IP_TYPE:
-            self.nat_manager.handle_ip(event)
-        elif packet.type == ethernet.ARP_TYPE:
-            self.arp_manager.handle_arp(event)
-        else:
-            Logger.info_red(f"Packet ignored: protocol received: {packet.type}.")
+    def _handle_PacketIn(self, event):
+        self.event_manager.handle(
+            self.event_manager.create_flow_packet_in_event(event)
+        )
     
-    def _handle_FlowRemoved(self, event: FlowRemoved):
-        Logger.info_red(f"_handle_FlowRemoved has been called")
-        match = event.ofp.match
-
-        if match.nw_dst == self.cfg.nat_public_ip:
-            nat_public_port = match.tp_dst
-            self.nat_manager.handle_flow_removed_incoming(nat_public_port)
-            Logger.info_yellow(
-                f"Flujo entrante removido por el switch (puerto público {nat_public_port})"
-            )
-        else:
-            protocol = IP_NUMBER_TO_PROTO.get(match.nw_proto)
-            if protocol is None:
-                return
-            self.nat_manager.handle_flow_removed_outgoing(
-                protocol, match.nw_src, match.tp_src, match.nw_dst, match.tp_dst
-            )
-            Logger.info_yellow(f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})")
+    def _handle_FlowRemoved(self, event):
+        self.event_manager.handle(
+            self.event_manager.create_flow_removed_event(event)
+        )
 
 def launch():
     def start_switch(event):

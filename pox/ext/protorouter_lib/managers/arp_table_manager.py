@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple
 
-from pox.ext.protorouter_lib.utils.logger import Logger
+from ext.protorouter_lib.utils.logger import Logger
 from pox.lib.addresses import EthAddr, IPAddr
 
 from protorouter_lib.models.arp_entry import ArpEntry

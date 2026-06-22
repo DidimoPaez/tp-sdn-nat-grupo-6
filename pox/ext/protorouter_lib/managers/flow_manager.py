@@ -1,3 +1,9 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ext.protorouter_lib.managers.nat_manager import NatTableManager
+
 import pox.openflow.libopenflow_01 as of
 
 from ext.protorouter_lib.constants import *
@@ -6,9 +12,35 @@ from ext.protorouter_lib.utils.logger import Logger
 
 
 class FlowManager:
-    def __init__(self, connection):
+    def __init__(self, connection, nat_table_manager: NatTableManager):
         self.cfg = ControllerConfig.get()
         self.connection = connection
+        self.nat_table_manager: NatTableManager = nat_table_manager
+
+    def handle_remove_incoming(self, match):
+        nat_public_port = match.tp_dst
+        self.nat_table_manager.handle_flow_removed_incoming(nat_public_port)
+        Logger.info_yellow(
+            f"Flujo entrante removido por el switch (puerto público {nat_public_port})"
+        )
+
+    def handle_remove_outgoing(self, match):
+        protocol = IP_NUMBER_TO_PROTO.get(match.nw_proto)
+        if protocol is None:
+            return
+        self.nat_table_manager.handle_flow_removed_outgoing(
+            protocol, match.nw_src, match.tp_src, match.nw_dst, match.tp_dst
+        )
+        Logger.info_yellow(f"Flujo saliente removido por el switch ({match.nw_src}:{match.tp_src} -> {match.nw_dst}:{match.tp_dst})")
+
+    def handle_flow_removed(self, event):
+        Logger.info_red(f"_handle_FlowRemoved has been called")
+        match = event.ofp.match
+
+        if match.nw_dst == self.cfg.nat_public_ip:
+            self.handle_remove_incoming(match)
+        else:
+            self.handle_remove_outgoing(match)
 
     def install_flows(self, nat_entry):
         ip_proto = PROTO_IP_NUMBER.get(nat_entry.protocol)

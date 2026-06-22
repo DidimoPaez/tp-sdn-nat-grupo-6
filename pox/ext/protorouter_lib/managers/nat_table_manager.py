@@ -28,37 +28,25 @@ class NatTableManager:
     def _release_port(self, port: int):
         self._free_ports.append(port)
 
-    def get_or_create_outgoing_entry(
-        self,
-        protocol,
-        host_private_ip,
-        host_private_port,
-        host_private_mac,
-        private_openflow_port,
-        host_public_ip,
-        host_public_port,
-    ):
+    def get(self, flow):
+        return self._find_outgoing(flow)
+
+    def put_and_get(self, flow):
+        self._evict_stale_entries()
+        nat_public_port = self._assign_public_port()
+        entry = NatEntry.from_flow(flow, nat_public_port)
+        self._entries[nat_public_port] = entry
+        return entry
+
+    def get_or_create_outgoing_entry(self, flow):
         self._evict_stale_entries()
 
-        existing = self._find_outgoing(
-            protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
-        )
+        existing = self._find_outgoing(flow)
         if existing is not None:
             return existing, False
 
         nat_public_port = self._assign_public_port()
-        entry = NatEntry(
-            protocol,
-            host_private_ip,
-            host_private_port,
-            host_private_mac,
-            private_openflow_port,
-            nat_public_port,
-            host_public_ip,
-            host_public_port,
-            None,  # host_public_mac: todavia no se conoce
-            None,  # public_openflow_port: todavia no se conoce
-        )
+        entry = NatEntry.from_flow(flow, nat_public_port)
         self._entries[nat_public_port] = entry
         return entry, True
 
@@ -66,17 +54,9 @@ class NatTableManager:
         self._evict_stale_entries()
         return self._entries.get(nat_public_port)
 
-    def _find_outgoing(
-        self, protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
-    ):
+    def _find_outgoing(self, flow):
         for entry in self._entries.values():
-            if (
-                entry.protocol == protocol
-                and entry.host_private_ip == host_private_ip
-                and entry.host_private_port == host_private_port
-                and entry.host_public_ip == host_public_ip
-                and entry.host_public_port == host_public_port
-            ):
+            if entry.flow.equals(flow):
                 return entry
         return None
 
@@ -85,18 +65,27 @@ class NatTableManager:
             port for port, entry in self._entries.items() if entry.is_stale()
         ]
         for port in expired_ports:
-            self._remove_entry(port)
+            self._remove_port(port)
 
-    def _remove_entry(self, nat_public_port):
-        self._entries.pop(nat_public_port, None)
-        self._release_port(nat_public_port)
+    def _remove_port(self, port):
+        self._entries.pop(port, None)
+        self._release_port(port)
+
+    def handle_flow_removed_outgoing(self, protocol, host_private_ip, host_private_port, host_public_ip, host_public_port):
+        entry = self._find_outgoing(
+            protocol, host_private_ip, host_private_port, host_public_ip, host_public_port
+        )
+        if entry is None:
+            return
+        if entry.mark_flow_removed("outgoing"):
+            self._remove_port(entry.nat_public_port)
 
     def handle_flow_removed_incoming(self, nat_public_port):
         entry = self._entries.get(nat_public_port)
         if entry is None:
             return
         if entry.mark_flow_removed("incoming"):
-            self._remove_entry(nat_public_port)
+            self._remove_port(nat_public_port)
 
     def debug_snapshot(self):
         return [
