@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple
 
+from pox.ext.protorouter_lib.utils.logger import Logger
 from pox.lib.addresses import EthAddr, IPAddr
 
 from protorouter_lib.models.arp_entry import ArpEntry
@@ -34,6 +35,13 @@ class ArpTableManager:
         entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
         self.table[ip_addr] = entry
         return entry, True
+
+    def learn_arp_entry(self, in_port, ip_addr, mac_addr):
+        entry, is_new = self.try_put(ip_addr, mac_addr, in_port)
+        if is_new:
+            Logger.info_cyan(f"ARP learned: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} | type={entry.port_type}")
+        else:
+            Logger.info_cyan(f"ARP already exists: {IPAddr(ip_addr)} -> {entry.mac} | port={in_port} ")
 
     def queue_pending(self, ip_addr, pending_packet) -> bool:
         ip_addr = IPAddr(ip_addr)

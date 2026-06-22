@@ -1,6 +1,7 @@
 from pox.core import core
 from pox.lib.packet.ethernet import ethernet
 import pox.openflow.libopenflow_01 as of
+from pox.openflow import FlowRemoved, PacketIn
 from pox.lib.util import dpidToStr
 
 from protorouter_lib.constants import *
@@ -64,11 +65,11 @@ class ProtoRouter(object):
 
         Logger.info_cyan("=== END CONNECTION UP ===")
 
-    def _handle_PacketIn(self, event):
+    def _handle_PacketIn(self, event: PacketIn):
         Logger.info_red(f"_handle_PacketIn has been called {self.global_counter} times")
         self.global_counter += 1
 
-        packet = event.parsed
+        packet: ethernet = event.parsed
 
         if not packet.parsed:
             Logger.warn("[DROP] PacketIn con trama no reconocida. POX no pudo decodificar el paquete.")
@@ -81,7 +82,7 @@ class ProtoRouter(object):
         else:
             Logger.info_red(f"Packet ignored: protocol received: {packet.type}.")
     
-    def _handle_FlowRemoved(self, event):
+    def _handle_FlowRemoved(self, event: FlowRemoved):
         Logger.info_red(f"_handle_FlowRemoved has been called")
         match = event.ofp.match
 

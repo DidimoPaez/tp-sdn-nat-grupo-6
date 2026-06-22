@@ -8,9 +8,10 @@ La ideas es que aca tambien esten los metodos de pregutna y respuesta tambien.
 .
 """
 
+from pox.openflow import ethernet, PacketIn
+
 from ext.protorouter_lib.managers.flow_manager import FlowManager
 from protorouter_lib.openflow_sender import OpenFlowSender
-
 from protorouter_lib.models.pending_packet import PendingPacket
 from protorouter_lib.constants import *
 from protorouter_lib.managers.nat_table_manager import NatTableManager
@@ -30,8 +31,8 @@ class NatManager:
         self.arp_table_manager: ArpTableManager = arp_table_manager
         self.flow_manager: FlowManager = flow_manager
 
-    def handle_ip(self, event):
-        packet = event.parsed
+    def handle_ip(self, event: PacketIn):
+        packet: ethernet = event.parsed
         ip_pkt = packet.payload
         in_port = event.port
         ip_dst = ip_pkt.dstip
@@ -41,26 +42,27 @@ class NatManager:
             f"MAC: {packet.src} → {packet.dst} | In Port: {in_port}",
         )
 
-        if ip_pkt.srcip.inNetwork(PRIVATE_SUBNET, PRIVATE_MASK):
-            Logger.info_green(
-                f"MATCH: {ip_pkt.srcip} belongs to private network {PRIVATE_SUBNET}/{PRIVATE_MASK}",
-            )
-
-            if not self.arp_table_manager.contains(ip_dst):
-                self.ask_for_mac_to_public_host(event)
-                return
-
-            self.forward_with_known_mac(event)
-
-        else:
+        if not ip_pkt.srcip.inNetwork(PRIVATE_SUBNET, PRIVATE_MASK):
             Logger.info_red(
                 f"NO MATCH: {ip_pkt.srcip} no pertenece a {PRIVATE_SUBNET}/{PRIVATE_MASK}",
             )
+            return
 
-    def ask_for_mac_to_public_host(self, event):
-        packet = event.parsed
+        Logger.info_green(
+            f"MATCH: {ip_pkt.srcip} belongs to private network {PRIVATE_SUBNET}/{PRIVATE_MASK}",
+        )
+
+        if not self.arp_table_manager.contains(ip_dst):
+            self.ask_for_mac_to_public_host(event)
+            return
+        self.forward_with_known_mac(event)
+
+    def ask_for_mac_to_public_host(self, event: PacketIn):
+        packet: ethernet = event.parsed
         ip_packet = packet.payload
         target_ip = ip_packet.dstip
+
+        # Validar que la IP no sea una IP de la red privada
         if IPAddr(target_ip).inNetwork(self.cfg.nat_private_net, self.cfg.nat_private_mask):
             Logger.info_red("[ERROR] MAC address Searchs just for private hosts")
             return
