@@ -74,12 +74,6 @@ class ArpManager:
         entry = ArpEntry(EthAddr(mac_addr), in_port, port_type)
         self._table[ip_addr] = entry
 
-        print("ARP LEARN - nueva entrada:")
-        print("  IP:", ip_addr)
-        print("  MAC:", mac_addr)
-        print("  Puerto:", in_port)
-        print("  Tipo:", port_type)
-
         return entry, True
 
 

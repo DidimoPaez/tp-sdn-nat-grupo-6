@@ -77,7 +77,7 @@ class ProtoRouter(object):
         self.openflow_sender = OpenFlowSender(connection=self.connection)
 
         # Intenta cada 5 segundos para fijar si hay algo para limpiar de la tabla de ARP  
-        Timer(5, self.cleanup_arp_table, recurring=True)
+        # Timer(5, self.cleanup_arp_table, recurring=True)
 
     def cleanup_arp_table(self):
         expired_arp_entries = self.arp_manager.evict_stale_entries()
@@ -101,6 +101,7 @@ class ProtoRouter(object):
 
     def _handle_PacketIn(self, event):
         log_color(RED, f"_handle_PacketIn has been called {self.global_counter} times")
+        self.cleanup_arp_table()
         self.global_counter += 1
 
         packet = event.parsed
