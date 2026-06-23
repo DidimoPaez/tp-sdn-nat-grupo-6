@@ -2,8 +2,8 @@
 
 from pox.lib.recoco import Timer
 
-from pox.core import core  # Main POX object
-from pox.lib.addresses import EthAddr, IPAddr  # Address types
+from pox.core import core  
+from pox.lib.addresses import EthAddr, IPAddr  
 from pox.lib.packet.arp import arp
 from pox.lib.packet.ethernet import ethernet
 from protorouter_lib.constants import (
