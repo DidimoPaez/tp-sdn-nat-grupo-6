@@ -28,16 +28,12 @@ class ArpManager:
         self._pending: dict = {}  # IPAddr -> list[PendingPacket]
 
 
-    # Tabla ARP
-
     def knows(self, ip_addr) -> bool:
         return IPAddr(ip_addr) in self._table
 
     def lookup(self, ip_addr):
         return self._table.get(IPAddr(ip_addr))
 
-
-    # Copia de la tabla actual, para debug
     def all_entries(self) -> dict:
         return dict(self._table)
     
@@ -54,7 +50,6 @@ class ArpManager:
 
         return expired_entries
     
-    # Aprende o refresca una entrada de la tabla ARP 
     def learn(self, ip_addr, mac_addr, in_port):
         ip_addr = IPAddr(ip_addr)
 
@@ -66,7 +61,6 @@ class ArpManager:
 
         existing = self._table.get(ip_addr)
 
-        # Si sigue existiendo la entrada, actualizo el tiempo 
         if existing is not None:
             existing.update(EthAddr(mac_addr), in_port, port_type)
             return existing, False
@@ -82,8 +76,6 @@ class ArpManager:
 
         return entry, True
 
-
-    # Paquetes pendientes de resolución ARP
     def queue_pending(self, ip_addr, pending_packet) -> bool:
         ip_addr = IPAddr(ip_addr)
         is_first_for_this_ip = ip_addr not in self._pending

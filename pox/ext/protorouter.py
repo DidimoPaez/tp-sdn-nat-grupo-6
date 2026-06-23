@@ -43,7 +43,7 @@ PUBLIC_PORT = 1  # Puerto del switch conectado a la red pública
 
 H1_MAC = EthAddr(
     "00:00:00:00:00:01"
-)  # MAC del host externo (TODO: resolver mediante ARP)
+)  
 
 # Datos de un flujo saliente, parseados una sola vez del paquete IP.
 FlowInfo = namedtuple(
@@ -76,7 +76,6 @@ class ProtoRouter(object):
         connection.addListeners(self)
         self.openflow_sender = OpenFlowSender(connection=self.connection)
 
-        # Intenta cada 5 segundos para fijar si hay algo para limpiar de la tabla de ARP  
         Timer(5, self.cleanup_arp_table, recurring=True)
 
     def cleanup_arp_table(self):
@@ -351,57 +350,6 @@ class ProtoRouter(object):
             host_public_ip=ip_packet.dstip,
             host_public_port=transport_packet.dstport,
         )
-
-    """
-        Instala en el switch las dos reglas (saliente y entrante) para
-        esta NatEntry ya resuelta. Es la versión PAT del bloque base de
-        instalación de flujos: misma estrategia (dos flow_mod), pero con
-        match por 5-tupla y acciones de NAT en vez de un solo par de MACs
-        fijo.
-        codigo original de hugo :
-        """
-         # # Instalar Flujo Saliente
-            # fm = of.ofp_flow_mod()
-            # fm.idle_timeout = 10
-
-            # # Filtro (Saliente)
-            # fm.match.nw_src = ip_pkt.srcip
-            # fm.match.dl_type = 0x800  # IPv4
-            # fm.match.in_port = in_port
-
-            # # Acción (Saliente)
-            # fm.actions.append(of.ofp_action_dl_addr.set_src(PUBLIC_MAC))
-            # fm.actions.append(of.ofp_action_dl_addr.set_dst(H1_MAC))
-            # fm.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
-            # self.connection.send(fm)
-
-            # # Instalar Flujo Entrante (para respuesta)
-            # fm_back = of.ofp_flow_mod()
-            # fm_back.idle_timeout = 10
-
-            # # Filtro (Entrante)
-            # fm_back.match.nw_src = ip_pkt.dstip
-            # fm_back.match.nw_dst = ip_pkt.srcip
-            # fm_back.match.dl_type = 0x800  # IPv4
-            # fm_back.match.in_port = PUBLIC_PORT
-
-            # # Acción (Entrante)
-            # fm_back.actions.append(of.ofp_action_dl_addr.set_src(PRIVATE_MAC))
-            # fm_back.actions.append(of.ofp_action_dl_addr.set_dst(packet.src))
-            # fm_back.actions.append(of.ofp_action_output(port=in_port))
-            # self.connection.send(fm_back)
-
-            # # Reenviar paquete actual con MACs actualizadas (Los posteriores pasan por flujo)
-            # packet.src = PUBLIC_MAC
-            # packet.dst = H1_MAC
-            # msg = of.ofp_packet_out()
-            # msg.data = packet.pack()
-            # msg.actions.append(of.ofp_action_output(port=PUBLIC_PORT))
-            # log_color(
-            #     CYAN,
-            #     f"ENVIANDO: {ip_pkt.srcip} → {ip_pkt.dstip} | MAC: {PUBLIC_MAC} → {H1_MAC} | Out Port: {PUBLIC_PORT}",
-            # )
-            # self.connection.send(msg)
 
     def install_flows(self, nat_entry):
         ip_proto = PROTO_IP_NUMBER.get(nat_entry.protocol)

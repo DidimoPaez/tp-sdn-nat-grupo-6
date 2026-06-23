@@ -46,8 +46,8 @@ class NatManager:
             nat_public_port,
             host_public_ip,
             host_public_port,
-            None,  # host_public_mac: todavia no se conoce
-            None,  # public_openflow_port: todavia no se conoce
+            None, 
+            None, 
         )
         self._entries[nat_public_port] = entry
         return entry, True

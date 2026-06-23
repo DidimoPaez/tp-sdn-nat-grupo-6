@@ -1,6 +1,6 @@
 import time
 
-from protorouter_lib.constants import STATE_INSTALLED, STATE_PENDING_ARP, TIME_OUT
+from protorouter_lib.constants import TIME_OUT
 class ArpEntry:
     def __init__(self, mac: str, switch_openflow_port: int, port_type: str):
         self.mac = mac
@@ -9,7 +9,6 @@ class ArpEntry:
         self.last_seen = time.monotonic()
         self.idle_timeout: int = TIME_OUT * 2
 
-    # Funciones parecidas a las de NatEntry
     def touch(self):
         self.last_seen = time.monotonic()
 
